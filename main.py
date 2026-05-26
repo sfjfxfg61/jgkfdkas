@@ -307,7 +307,7 @@ async def lang(c: CallbackQuery):
     await c.answer()
 
 # =====================================================
-# BUY HANDLER
+# BUY HANDLER (Улучшенный под Telegram Stars)
 # =====================================================
 
 @dp.callback_query(F.data == "buy")
@@ -345,20 +345,23 @@ async def buy_handler(c: CallbackQuery):
 
         price = get_price(lang)
 
+        # Отправляем инвойс со всеми гарантированными параметрами для XTR
         await bot.send_invoice(
             chat_id=user_id,
             title=TEXTS[lang]["title"],
             description=TEXTS[lang]["desc"],
-            payload=f"pay_{user_id}",
-            provider_token="",
+            payload=f"stars_pay_{user_id}",  # сделаем payload более явным
+            provider_token="",               # для Stars всегда пусто
             currency="XTR",
-            prices=[LabeledPrice(label="Access", amount=price)],
+            prices=[LabeledPrice(label="Telegram Stars", amount=price)],
+            start_parameter="join_space",    # обязательный параметр для переходов по прямой ссылке инвойса
         )
 
         await c.answer()
 
     except Exception as e:
-        logging.exception(e)
+        logging.exception(f"Ошибка отправки инвойса для {c.from_user.id}: {e}")
+        await c.answer("Произошла ошибка при создании счета. Попробуйте позже.", show_alert=True)
 
 # =====================================================
 # PAYMENT
