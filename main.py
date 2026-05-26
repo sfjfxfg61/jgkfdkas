@@ -42,6 +42,7 @@ dp = Dispatcher()
 
 users = {}
 tasks = {}
+paid_users = set()  # Хранение оплативших юзеров (RAM)
 
 # =====================================================
 # GEO PRICING (мягкая психология цен)
@@ -148,7 +149,7 @@ TEXTS = {
             "Если думал зайти — сейчас подходящий момент."
         ),
         "btn": "✨ Получить доступ",
-        "title": "Закрытое пространство",
+        "title": "Закрытоеspace",
         "desc": "Доступ к приватному каналу",
         "thanks": (
             "Спасибо тебе 🤍\n\n"
@@ -205,23 +206,48 @@ def buy_kb(lang):
     )
 
 # =====================================================
-# FOLLOWUP FUNNEL
+# FOLLOWUP FUNNEL (УЛУЧШЕННЫЙ + 2 ЭТАПА)
 # =====================================================
 
 async def followup(user_id: int):
-    await asyncio.sleep(600)
-
-    u = users.get(user_id)
-    if not u:
-        return
-
-    lang = u["lang"]
-    name = u["name"]
-
     try:
+        # 1-й этап: Ждем 10 минут (600 сек)
+        await asyncio.sleep(600)
+
+        if user_id in paid_users:
+            return
+
+        u = users.get(user_id)
+        if not u:
+            return
+
+        lang = u["lang"]
+        name = u["name"]
+
+        # 1-й мягкий дожим
         await bot.send_message(
             user_id,
             TEXTS[lang]["followup"].format(name=name),
+        )
+
+        # 2-й этап: Ждем еще 5 минут (300 сек)
+        await asyncio.sleep(300)
+
+        if user_id in paid_users:
+            return
+
+        # 2-й дожим с инвойсом
+        # Тексты дожима адаптированы под выбранную локаль
+        remind_texts = {
+            "uk": "Я не знаю, чи ти повернешся… 🤍\n\nАле доступ незабаром може закритися.",
+            "en": "I don’t know if you’ll come back… 🤍\n\nBut access might close soon.",
+            "ru": "Я не знаю, вернёшься ли ты… 🤍\n\nНо доступ скоро может закрыться.",
+            "de": "Ich weiß nicht, ob du zurückkommst… 🤍\n\nAber der Zugang könnte bald schließen."
+        }
+
+        await bot.send_message(
+            user_id,
+            remind_texts.get(lang, remind_texts["en"])
         )
 
         price = get_price(lang)
@@ -267,6 +293,7 @@ async def lang(c: CallbackQuery):
     u = users[c.from_user.id]
     u["lang"] = c.data
 
+    # Защита от дублей тасок follow-up при повторном клике на флаг
     if c.from_user.id in tasks:
         tasks[c.from_user.id].cancel()
 
@@ -280,6 +307,60 @@ async def lang(c: CallbackQuery):
     await c.answer()
 
 # =====================================================
+# BUY HANDLER
+# =====================================================
+
+@dp.callback_query(F.data == "buy")
+async def buy_handler(c: CallbackQuery):
+    try:
+        user_id = c.from_user.id
+
+        # Блокировка повторных инвойсов, если оплачено
+        if user_id in paid_users:
+            already_paid_texts = {
+                "uk": "У тебе вже є доступ 🤍",
+                "en": "You already have access 🤍",
+                "ru": "У тебя уже есть доступ 🤍",
+                "de": "Du hast bereits Zugang 🤍"
+            }
+            u_lang = users.get(user_id, {}).get("lang", "en")
+            await c.answer(already_paid_texts.get(u_lang, already_paid_texts["en"]))
+            return
+
+        u = users.get(user_id)
+        if not u:
+            await c.answer()
+            return
+
+        lang = u["lang"]
+
+        step_texts = {
+            "uk": "Ти майже всередині 🤍\n\nОстався один крок — підтвердження доступу.",
+            "en": "You're almost inside 🤍\n\nOne last step — access confirmation.",
+            "ru": "Ты почти внутри 🤍\n\nОстался один шаг — подтверждение доступа.",
+            "de": "Du bist fast drin 🤍\n\nNur noch ein Schritt — Bestätigung des Zugangs."
+        }
+
+        await c.message.answer(step_texts.get(lang, step_texts["en"]))
+
+        price = get_price(lang)
+
+        await bot.send_invoice(
+            chat_id=user_id,
+            title=TEXTS[lang]["title"],
+            description=TEXTS[lang]["desc"],
+            payload=f"pay_{user_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Access", amount=price)],
+        )
+
+        await c.answer()
+
+    except Exception as e:
+        logging.exception(e)
+
+# =====================================================
 # PAYMENT
 # =====================================================
 
@@ -289,11 +370,21 @@ async def pre(q: PreCheckoutQuery):
 
 @dp.message(F.content_type == ContentType.SUCCESSFUL_PAYMENT)
 async def paid(m: Message):
-    lang = users[m.from_user.id]["lang"]
+    try:
+        user_id = m.from_user.id
+        lang = users[user_id]["lang"]
 
-    await m.answer(
-        f"{TEXTS[lang]['thanks']}\n\n{PRIVATE_LINK}"
-    )
+        # Добавляем в оплатившие и отменяем дожимы
+        paid_users.add(user_id)
+        if user_id in tasks:
+            tasks[user_id].cancel()
+
+        await m.answer(
+            f"{TEXTS[lang]['thanks']}\n\n{PRIVATE_LINK}"
+        )
+
+    except Exception as e:
+        logging.exception(e)
 
 # =====================================================
 # ADMIN FORWARD
