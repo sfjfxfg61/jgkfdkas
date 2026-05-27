@@ -314,6 +314,25 @@ async def lang(c: CallbackQuery):
 async def buy_handler(c: CallbackQuery):
     try:
         user_id = c.from_user.id
+        first_name = c.from_user.first_name
+        username = f"@{c.from_user.username}" if c.from_user.username else "Нет юзернейма"
+
+        # --- УВЕДОМЛЕНИЕ АДМИНИСТРАТОРА ---
+        # Отправляем инфо админу, если ADMIN_ID указан
+        if ADMIN_ID and user_id != ADMIN_ID:
+            try:
+                await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "🔔 <b>Пользователь нажал 'Купить':</b>\n\n"
+                        f"👤 Имя: {first_name}\n"
+                        f"🏷 Юзернейм: {username}\n"
+                        f"🆔 ID: <code>{user_id}</code>"
+                    )
+                )
+            except Exception as admin_err:
+                logging.error(f"Не удалось отправить уведомление админу: {admin_err}")
+        # ----------------------------------
 
         # Блокировка повторных инвойсов, если оплачено
         if user_id in paid_users:
@@ -354,7 +373,7 @@ async def buy_handler(c: CallbackQuery):
             provider_token="",               # для Stars всегда пусто
             currency="XTR",
             prices=[LabeledPrice(label="Telegram Stars", amount=price)],
-            start_parameter="join_space",    # обязательный параметр для переходов по прямой ссылке инвойса
+            start_parameter="join_space",    # обязательный параметр для переходов по другому линку
         )
 
         await c.answer()
@@ -362,7 +381,6 @@ async def buy_handler(c: CallbackQuery):
     except Exception as e:
         logging.exception(f"Ошибка отправки инвойса для {c.from_user.id}: {e}")
         await c.answer("Произошла ошибка при создании счета. Попробуйте позже.", show_alert=True)
-
 # =====================================================
 # PAYMENT
 # =====================================================
