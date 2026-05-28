@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from aiohttp import web
+from aiogram.filters import CommandObject
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
