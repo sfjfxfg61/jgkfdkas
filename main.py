@@ -219,7 +219,7 @@ async def followup(user_id: int):
             return
 
         u = users.get(user_id)
-        if not u:
+        if not u or not u.get("lang"):  # Защита от пустой локали при сбоях
             return
 
         lang = u["lang"]
@@ -237,8 +237,13 @@ async def followup(user_id: int):
         if user_id in paid_users:
             return
 
+        # Перепроверяем юзера (вдруг за 5 минут он успел поменять язык в боте)
+        u = users.get(user_id)
+        if not u or not u.get("lang"):
+            return
+        lang = u["lang"]
+
         # 2-й дожим с инвойсом
-        # Тексты дожима адаптированы под выбранную локаль
         remind_texts = {
             "uk": "Я не знаю, чи ти повернешся… 🤍\n\nАле доступ незабаром може закритися.",
             "en": "I don’t know if you’ll come back… 🤍\n\nBut access might close soon.",
@@ -265,6 +270,11 @@ async def followup(user_id: int):
 
     except Exception as e:
         logging.exception(e)
+        
+    finally:
+        # Гарантированно удаляет задачу из RAM-памяти (из словаря tasks),
+        # когда функция завершается (или при успехе, или при ошибке/отмене).
+        tasks.pop(user_id, None)
 
 # =====================================================
 # START + SOURCE TRACKING
