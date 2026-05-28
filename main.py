@@ -271,8 +271,9 @@ async def followup(user_id: int):
 # =====================================================
 
 @dp.message(CommandStart())
-async def start(m: Message):
-    ref = m.text.split(" ")[1] if len(m.text.split()) > 1 else "direct"
+async def start(m: Message, command: CommandObject):
+    # command.args автоматически и безопасно заберет всё, что идет после /start
+    ref = command.args if command.args else "direct"
 
     users[m.from_user.id] = {
         "name": m.from_user.first_name,
@@ -284,27 +285,31 @@ async def start(m: Message):
         "Choose language 🤍",
         reply_markup=lang_kb(),
     )
-
 # =====================================================
 # LANGUAGE SELECT
 # =====================================================
 
 @dp.callback_query(F.data.in_(["uk", "en", "ru", "de"]))
 async def lang(c: CallbackQuery):
-    u = users[c.from_user.id]
+    user_id = c.from_user.id
+    u = users.get(user_id)
+    
+    # Защита от падения: если бота перезапустили и памяти нет
+    if not u:
+        await c.answer("Сессия истекла. Пожалуйста, введите /start заново 🤍", show_alert=True)
+        return
+
     u["lang"] = c.data
 
-    # Защита от дублей тасок follow-up при повторном клике на флаг
-    if c.from_user.id in tasks:
-        tasks[c.from_user.id].cancel()
+    if user_id in tasks:
+        tasks[user_id].cancel()
 
-    tasks[c.from_user.id] = asyncio.create_task(followup(c.from_user.id))
+    tasks[user_id] = asyncio.create_task(followup(user_id))
 
     await c.message.answer(
         TEXTS[c.data]["welcome"].format(name=u["name"]),
         reply_markup=buy_kb(c.data),
     )
-
     await c.answer()
 
 # =====================================================
@@ -390,16 +395,20 @@ async def buy_handler(c: CallbackQuery):
 async def pre(q: PreCheckoutQuery):
     await q.answer(True)
 
-@dp.message(F.content_type == ContentType.SUCCESSFUL_PAYMENT)
+@dp.message(F.successful_payment)
 async def paid(m: Message):
     try:
         user_id = m.from_user.id
-        lang = users[user_id]["lang"]
+        
+        # Защита на случай, если юзера почему-то нет в RAM (например, после перезапуска)
+        u = users.get(user_id, {"lang": "en"})
+        lang = u["lang"] if u["lang"] else "en"
 
-        # Добавляем в оплатившие и отменяем дожимы
         paid_users.add(user_id)
+        
         if user_id in tasks:
             tasks[user_id].cancel()
+            tasks.pop(user_id, None) # Чистим память сразу
 
         await m.answer(
             f"{TEXTS[lang]['thanks']}\n\n{PRIVATE_LINK}"
