@@ -2,13 +2,12 @@ import asyncio
 import logging
 import os
 import re
+import aiohttp
 from aiohttp import web
-from aiogram.filters import CommandObject
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode, ContentType
-from aiogram.filters import CommandStart
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -19,451 +18,323 @@ from aiogram.types import (
 )
 
 # =====================================================
-# CONFIG
+# CONFIG & ENV
 # =====================================================
+logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 PORT = int(os.getenv("PORT", "8080"))
-PRIVATE_LINK = os.getenv("PRIVATE_CHANNEL_URL")
+PRIVATE_LINK = os.getenv("PRIVATE_CHANNEL_URL", "https://t.me/your_channel")
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN missing")
+# Supabase Credentials
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-)
+if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Missing required environment variables (BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY)")
 
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# =====================================================
-# MEMORY
-# =====================================================
-
-users = {}
-tasks = {}
-paid_users = set()  # Хранение оплативших юзеров (RAM)
+# Хранилище запущенных тасков фоллоуапов в RAM для отмены при покупке
+active_tasks = {}
 
 # =====================================================
-# GEO PRICING (мягкая психология цен)
+# SUPABASE LIGHTWEIGHT API CLIENT
 # =====================================================
+async def sync_user_to_db(user_id: int, username: str, first_name: str, lang: str, ref: str):
+    """Сохраняет или обновляет пользователя методом UPSERT"""
+    url = f"{SUPABASE_URL}/rest/v1/users"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "first_name": first_name,
+        "lang": lang,
+        "ref": ref
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status not in [200, 201]:
+                    logging.error(f"Supabase error sync: {await resp.text()}")
+        except Exception as e:
+            logging.exception(f"DB Sync failed: {e}")
 
+async def update_payment_status(user_id: int):
+    """Фиксирует факт оплаты в БД"""
+    url = f"{SUPABASE_URL}/rest/v1/users?user_id=eq.{user_id}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.patch(url, json={"is_paid": True}, headers=headers) as resp:
+                if resp.status not in [200, 204]:
+                    logging.error(f"Supabase error payment: {await resp.text()}")
+        except Exception as e:
+            logging.exception(f"DB Payment update failed: {e}")
+
+# =====================================================
+# MARKETING LOGIC & TEXTS
+# =====================================================
 def get_price(lang: str) -> int:
-    # Восточная Европа / СНГ
-    if lang in ["uk", "ru"]:
-        return 500
-
-    # Западная Европа (более платежеспособные)
-    if lang in ["en", "de"]:
-        return 1000
-
-    return 1000
-
-# =====================================================
-# WEB SERVER (Render keep alive)
-# =====================================================
-
-async def ok(request):
-    return web.Response(text="OK")
-
-async def start_web():
-    app = web.Application()
-    app.router.add_get("/", ok)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-
-    logging.info("Web server started")
-
-# =====================================================
-# TEXT FUNNEL (УЛУЧШЕННАЯ ПСИХОЛОГИЯ)
-# =====================================================
+    return 500 if lang in ["uk", "ru"] else 1000
 
 TEXTS = {
     "uk": {
-        "welcome": (
-            "Привіт, {name} 🤍\n\n"
-            "Я не зовсім випадково залишила це відкритим для тебе.\n\n"
-            "Тут невеликий приватний простір — спокійний, без зайвого шуму, "
-            "де я ділюся тим, що зазвичай не показую всім.\n\n"
-            "Якщо тобі відгукується така атмосфера — ти можеш залишитися."
-        ),
-        "followup": (
-            "{name}, ти ще тут? 🤍\n\n"
-            "Я якраз додала нові матеріали в закритий простір.\n\n"
-            "Зазвичай я не залишаю їх надовго відкритими — "
-            "просто не люблю перевантажувати канал.\n\n"
-            "Якщо ти хотів зайти — зараз хороший момент."
-        ),
-        "btn": "✨ Отримати доступ",
+        "welcome": "Привіт, {name} 🤍\n\nЯ не випадково відкрила тобі цей доступ. Тут мій приватний простір — без зайвих очей та цензури, де я ділюся тим, чого ніколи не буде у відкритому доступі.\n\nЯкщо ти тут — це твій шанс зазирнути всередину. Місця обмежені.",
+        "followup_1": "Ти ще тут? 😉\n\nЯ щойно завантажила свіжий контент у приват. Зазвичай доступ відкритий лічені хвилини, щоб зберегти кулуарність. Потім вхід буде закрито.",
+        "followup_2": "Я не знаю, чи ти повернешся сюди знову... 🤍\n\nАле просто зараз лінк видаляється. Якщо хочеш отримати все — забирай доступ в один клік нижче. Це остання пропозиція.",
+        "btn": "✨ Отримати ексклюзивний доступ",
         "title": "Приватний простір",
-        "desc": "Доступ до закритого каналу з особистим контентом",
-        "thanks": (
-            "Дякую тобі 🤍\n\n"
-            "Твій доступ уже відкритий.\n\n"
-            "Збережи спокійний вхід нижче:"
-        ),
+        "desc": "Повний доступ до закритих матеріалів",
+        "thanks": "Твій доступ підтверджено 🤍\n\nЛаскаво просимо до нашого секретного простору. Твоє персональне посилання нижче:",
     },
-
     "en": {
-        "welcome": (
-            "Hey, {name} 🤍\n\n"
-            "I didn’t leave this open by accident.\n\n"
-            "This is a small private space — calm, quiet, without noise, "
-            "where I share things I usually don’t post publicly.\n\n"
-            "If this kind of atmosphere feels right to you, you’re welcome to stay."
-        ),
-        "followup": (
-            "{name}, are you still here? 🤍\n\n"
-            "I just added something new inside the private space.\n\n"
-            "I usually don’t keep things open for too long — "
-            "I like it to stay simple and intentional.\n\n"
-            "If you were thinking about it… now is a good moment."
-        ),
-        "btn": "✨ Get access",
-        "title": "Private space",
-        "desc": "Exclusive access to private content",
-        "thanks": (
-            "Thank you 🤍\n\n"
-            "Your access is now active.\n\n"
-            "You can enter here:"
-        ),
+        "welcome": "Hey, {name} 🤍\n\nI didn't open this for you by accident. This is my private space — uncensored and away from prying eyes. I share things here that will never be public.\n\nIf you're here, it's your chance to look inside. Spots are limited.",
+        "followup_1": "Are you still here? 😉\n\nI just uploaded brand new content to the private channel. I keep the doors open for just a few minutes to maintain exclusivity. Don't miss it.",
+        "followup_2": "I don't know if you'll ever come back here... 🤍\n\nBut right now, the link is self-destructing. If you want it all — grab access below. This is your final call.",
+        "btn": "✨ Get Exclusive Access",
+        "title": "Private Space",
+        "desc": "Full access to premium private content",
+        "thanks": "Your access is verified 🤍\n\nWelcome to our secret circle. Your personal link is below:",
     },
-
     "ru": {
-        "welcome": (
-            "Привет, {name} 🤍\n\n"
-            "Я не просто так оставила это открытым.\n\n"
-            "Это небольшой закрытый уголок — спокойный, без лишнего шума, "
-            "где я делюсь тем, что обычно не публикую.\n\n"
-            "Если тебе откликается такая атмосфера — ты можешь остаться."
-        ),
-        "followup": (
-            "{name}, ты ещё здесь? 🤍\n\n"
-            "Я только что добавила новое внутри закрытого пространства.\n\n"
-            "Обычно я не держу доступ открытым долго — "
-            "мне важно, чтобы всё оставалось аккуратно и без перегруза.\n\n"
-            "Если думал зайти — сейчас подходящий момент."
-        ),
-        "btn": "✨ Получить доступ",
-        "title": "Закрытое пространство",
-        "desc": "Доступ к приватному каналу",
-        "thanks": (
-            "Спасибо тебе 🤍\n\n"
-            "Доступ уже открыт.\n\n"
-            "Ссылка ниже:"
-        ),
+        "welcome": "Привет, {name} 🤍\n\nЯ не случайно открыла тебе этот доступ. Здесь мой приватный уголок — без лишних глаз и цензуры, где я делюсь тем, чего никогда не будет в паблике.\n\nЕсли ты здесь — это твой шанс заглянуть внутрь. Места ограничены.",
+        "followup_1": "Ты ещё здесь? 😉\n\nЯ только что загрузила свежий контент в приват. Обычно доступ открыт считанные минуты, чтобы сохранить кулуарность. Потом вход будет закрыт.",
+        "followup_2": "Я не знаю, вернешься ли ты сюда снова... 🤍\n\nНо прямо сейчас ссылка удаляется. Если хочешь получить всё — забирай доступ в один клик ниже. Это последнее предложение.",
+        "btn": "✨ Получить эксклюзивный доступ",
+        "title": "Приватное пространство",
+        "desc": "Полный доступ к закрытым материалам",
+        "thanks": "Твой доступ подтвержден 🤍\n\nДобро пожаловать в наше секретное пространство. Твоя персональная ссылка ниже:",
     },
-
     "de": {
-        "welcome": (
-            "Hey, {name} 🤍\n\n"
-            "Ich habe das nicht zufällig offen gelassen.\n\n"
-            "Das ist ein kleiner privater Raum — ruhig, ohne Ablenkung, "
-            "wo ich Dinge teile, die ich normalerweise nicht öffentlich poste.\n\n"
-            "Wenn sich das für dich richtig anfühlt, bist du willkommen."
-        ),
-        "followup": (
-            "{name}, bist du noch da? 🤍\n\n"
-            "Ich habe gerade neue Inhalte im privaten Bereich hinzugefügt.\n\n"
-            "Ich lasse solche Zugänge normalerweise nicht lange offen — "
-            "es soll bewusst und ruhig bleiben.\n\n"
-            "Falls du überlegt hast reinzuschauen — jetzt ist ein guter Moment."
-        ),
-        "btn": "✨ Zugang erhalten",
+        "welcome": "Hey, {name} 🤍\n\nIch habe diesen Zugang nicht ohne Grund für dich geöffnet. Das ist mein privater Raum — unzensiert und fernab von neugierigen Blicken.\n\nWenn du hier bist, ist das deine Chance, einen Blick hineinzuwerfen. Die Plätze sind streng limitiert.",
+        "followup_1": "Bist du noch da? 😉\n\nIch habe gerade exklusive neue Inhalte hochgeladen. Ich lasse den Zugang nur für wenige Minuten offen. Nutze die Zeit.",
+        "followup_2": "Ich weiß nicht, ob du jemals wiederkommst... 🤍\n\nAber genau jetzt wird der Link deaktiviert. Wenn du alles willst — sichere dir unten den Zugang. Letzte Chance.",
+        "btn": "✨ Exklusiven Zugang sichern",
         "title": "Privater Raum",
-        "desc": "Exklusiver Zugang",
-        "thanks": (
-            "Danke dir 🤍\n\n"
-            "Dein Zugang ist jetzt aktiv.\n\n"
-            "Link unten:"
-        ),
-    },
+        "desc": "Vollständiger Zugang zu privaten Inhalten",
+        "thanks": "Dein Zugang ist bestätigt 🤍\n\nWillkommen im privaten Kreis. Dein persönlicher Link unten:",
+    }
 }
 
-# =====================================================
-# KEYBOARD
-# =====================================================
+def get_user_lang(m: Message) -> str:
+    user_lang = m.from_user.language_code
+    return user_lang if user_lang in TEXTS else "en"
 
-def lang_kb():
+# =====================================================
+# KEYBOARDS
+# =====================================================
+def main_kb(lang: str):
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🇺🇦 UA", callback_data="uk")],
-            [InlineKeyboardButton(text="🇬🇧 EN", callback_data="en")],
-            [InlineKeyboardButton(text="🇷🇺 RU", callback_data="ru")],
-            [InlineKeyboardButton(text="🇩🇪 DE", callback_data="de")],
+            [InlineKeyboardButton(text=TEXTS[lang]["btn"], callback_data="buy_stars")],
+            [InlineKeyboardButton(text="🌐 Change Language / Сменить язык", callback_data="change_lang")]
         ]
     )
 
-def buy_kb(lang):
+def lang_selection_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=TEXTS[lang]["btn"], callback_data="buy")]
+            [InlineKeyboardButton(text="🇺🇦 Українська", callback_data="set_lang_uk")],
+            [InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang_en")],
+            [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang_ru")],
+            [InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="set_lang_de")]
         ]
     )
 
 # =====================================================
-# FOLLOWUP FUNNEL (УЛУЧШЕННЫЙ + 2 ЭТАПА)
+# MARKETING AUTOMATION (FOLLOWUP FUNNEL)
 # =====================================================
-
-async def followup(user_id: int):
+async def marketing_funnel(user_id: int, name: str, lang: str):
     try:
-        # 1-й этап: Ждем 10 минут (600 сек)
+        # Дожим 1: через 10 минут (600 секунд)
         await asyncio.sleep(600)
-
-        if user_id in paid_users:
-            return
-
-        u = users.get(user_id)
-        if not u or not u.get("lang"):  # Защита от пустой локали при сбоях
-            return
-
-        lang = u["lang"]
-        name = u["name"]
-
-        # 1-й мягкий дожим
         await bot.send_message(
-            user_id,
-            TEXTS[lang]["followup"].format(name=name),
+            chat_id=user_id,
+            text=TEXTS[lang]["followup_1"].format(name=name),
+            reply_markup=main_kb(lang)
         )
 
-        # 2-й этап: Ждем еще 5 минут (300 сек)
+        # Дожим 2: еще через 5 минут (300 секунд) + выставление счета автоматически
         await asyncio.sleep(300)
-
-        if user_id in paid_users:
-            return
-
-        # Перепроверяем юзера (вдруг за 5 минут он успел поменять язык в боте)
-        u = users.get(user_id)
-        if not u or not u.get("lang"):
-            return
-        lang = u["lang"]
-
-        # 2-й дожим с инвойсом
-        remind_texts = {
-            "uk": "Я не знаю, чи ти повернешся… 🤍\n\nАле доступ незабаром може закритися.",
-            "en": "I don’t know if you’ll come back… 🤍\n\nBut access might close soon.",
-            "ru": "Я не знаю, вернёшься ли ты… 🤍\n\nНо доступ скоро может закрыться.",
-            "de": "Ich weiß nicht, ob du zurückkommst… 🤍\n\nAber der Zugang könnte bald schließen."
-        }
-
-        await bot.send_message(
-            user_id,
-            remind_texts.get(lang, remind_texts["en"])
-        )
-
+        await bot.send_message(chat_id=user_id, text=TEXTS[lang]["followup_2"].format(name=name))
+        
         price = get_price(lang)
-
         await bot.send_invoice(
             chat_id=user_id,
             title=TEXTS[lang]["title"],
             description=TEXTS[lang]["desc"],
-            payload=f"pay_{user_id}",
+            payload=f"stars_{user_id}_{lang}",
             provider_token="",
             currency="XTR",
-            prices=[LabeledPrice(label="Access", amount=price)],
+            prices=[LabeledPrice(label="Telegram Stars", amount=price)],
+            start_parameter="join_private"
         )
-
+    except asyncio.CancelledError:
+        logging.info(f"Funnel for user {user_id} cancelled due to purchase.")
     except Exception as e:
-        logging.exception(e)
-        
-    finally:
-        # Гарантированно удаляет задачу из RAM-памяти (из словаря tasks),
-        # когда функция завершается (или при успехе, или при ошибке/отмене).
-        tasks.pop(user_id, None)
+        logging.exception(f"Funnel error for {user_id}: {e}")
 
 # =====================================================
-# START + SOURCE TRACKING
+# HANDLERS
 # =====================================================
-
 @dp.message(CommandStart())
-async def start(m: Message, command: CommandObject):
-    # command.args автоматически и безопасно заберет всё, что идет после /start
+async def cmd_start(m: Message, command: CommandObject):
+    user_id = m.from_user.id
     ref = command.args if command.args else "direct"
+    lang = get_user_lang(m)
+    name = m.from_user.first_name
+    username = f"@{m.from_user.username}" if m.from_user.username else "None"
 
-    users[m.from_user.id] = {
-        "name": m.from_user.first_name,
-        "lang": None,
-        "ref": ref,
-    }
+    # Асинхронно сохраняем в БД (без ожидания ответа для максимальной скорости бота)
+    asyncio.create_task(sync_user_to_db(user_id, username, name, lang, ref))
+
+    # Перезапускаем дожимы, если пользователь зашел заново
+    if user_id in active_tasks:
+        active_tasks[user_id].cancel()
+    active_tasks[user_id] = asyncio.create_task(marketing_funnel(user_id, name, lang))
 
     await m.answer(
-        "Choose language 🤍",
-        reply_markup=lang_kb(),
+        text=TEXTS[lang]["welcome"].format(name=name),
+        reply_markup=main_kb(lang)
     )
-# =====================================================
-# LANGUAGE SELECT
-# =====================================================
 
-@dp.callback_query(F.data.in_(["uk", "en", "ru", "de"]))
-async def lang(c: CallbackQuery):
-    user_id = c.from_user.id
-    u = users.get(user_id)
+@dp.callback_query(F.data == "change_lang")
+async def process_change_lang(c: CallbackQuery):
+    await c.message.edit_text("Select your language / Выберите язык:", reply_markup=lang_selection_kb())
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("set_lang_"))
+async def process_set_lang(c: CallbackQuery):
+    lang = c.data.split("_")[-1]
+    name = c.from_user.first_name
     
-    # Защита от падения: если бота перезапустили и памяти нет
-    if not u:
-        await c.answer("Сессия истекла. Пожалуйста, введите /start заново 🤍", show_alert=True)
-        return
+    # Обновляем язык в воронке дожимов
+    if c.from_user.id in active_tasks:
+        active_tasks[c.from_user.id].cancel()
+    active_tasks[c.from_user.id] = asyncio.create_task(marketing_funnel(c.from_user.id, name, lang))
 
-    u["lang"] = c.data
+    await c.message.edit_text(text=TEXTS[lang]["welcome"].format(name=name), reply_markup=main_kb(lang))
+    await c.answer()
 
-    if user_id in tasks:
-        tasks[user_id].cancel()
+@dp.callback_query(F.data == "buy_stars")
+async def process_buy_stars(c: CallbackQuery):
+    user_id = c.from_user.id
+    lang = get_user_lang(c)
+    price = get_price(lang)
 
-    tasks[user_id] = asyncio.create_task(followup(user_id))
+    # Лог админу о клике на кнопку покупки
+    if ADMIN_ID and user_id != ADMIN_ID:
+        try:
+            username = f"@{c.from_user.username}" if c.from_user.username else "No User"
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🔥 <b>Клик по кнопке 'Купить':</b>\nID: <code>{user_id}</code>\nUser: {username}"
+            )
+        except Exception:
+            pass
 
-    await c.message.answer(
-        TEXTS[c.data]["welcome"].format(name=u["name"]),
-        reply_markup=buy_kb(c.data),
+    await bot.send_invoice(
+        chat_id=user_id,
+        title=TEXTS[lang]["title"],
+        description=TEXTS[lang]["desc"],
+        payload=f"stars_{user_id}_{lang}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Telegram Stars", amount=price)],
+        start_parameter="join_private"
     )
     await c.answer()
 
 # =====================================================
-# BUY HANDLER (Улучшенный под Telegram Stars)
+# PAYMENTS PROCESSING
 # =====================================================
-
-@dp.callback_query(F.data == "buy")
-async def buy_handler(c: CallbackQuery):
-    try:
-        user_id = c.from_user.id
-        first_name = c.from_user.first_name
-        username = f"@{c.from_user.username}" if c.from_user.username else "Нет юзернейма"
-
-        # --- УВЕДОМЛЕНИЕ АДМИНИСТРАТОРА ---
-        # Отправляем инфо админу, если ADMIN_ID указан
-        if ADMIN_ID and user_id != ADMIN_ID:
-            try:
-                await bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        "🔔 <b>Пользователь нажал 'Купить':</b>\n\n"
-                        f"👤 Имя: {first_name}\n"
-                        f"🏷 Юзернейм: {username}\n"
-                        f"🆔 ID: <code>{user_id}</code>"
-                    )
-                )
-            except Exception as admin_err:
-                logging.error(f"Не удалось отправить уведомление админу: {admin_err}")
-        # ----------------------------------
-
-        # Блокировка повторных инвойсов, если оплачено
-        if user_id in paid_users:
-            already_paid_texts = {
-                "uk": "У тебе вже є доступ 🤍",
-                "en": "You already have access 🤍",
-                "ru": "У тебя уже есть доступ 🤍",
-                "de": "Du hast bereits Zugang 🤍"
-            }
-            u_lang = users.get(user_id, {}).get("lang", "en")
-            await c.answer(already_paid_texts.get(u_lang, already_paid_texts["en"]))
-            return
-
-        u = users.get(user_id)
-        if not u:
-            await c.answer()
-            return
-
-        lang = u["lang"]
-
-        step_texts = {
-            "uk": "Ти майже всередині 🤍\n\nОстався один крок — підтвердження доступу.",
-            "en": "You're almost inside 🤍\n\nOne last step — access confirmation.",
-            "ru": "Ты почти внутри 🤍\n\nОстался один шаг — подтверждение доступа.",
-            "de": "Du bist fast drin 🤍\n\nNur noch ein Schritt — Bestätigung des Zugangs."
-        }
-
-        await c.message.answer(step_texts.get(lang, step_texts["en"]))
-
-        price = get_price(lang)
-
-        # Отправляем инвойс со всеми гарантированными параметрами для XTR
-        await bot.send_invoice(
-            chat_id=user_id,
-            title=TEXTS[lang]["title"],
-            description=TEXTS[lang]["desc"],
-            payload=f"stars_pay_{user_id}",  # сделаем payload более явным
-            provider_token="",               # для Stars всегда пусто
-            currency="XTR",
-            prices=[LabeledPrice(label="Telegram Stars", amount=price)],
-            start_parameter="join_space",    # обязательный параметр для переходов по другому линку
-        )
-
-        await c.answer()
-
-    except Exception as e:
-        logging.exception(f"Ошибка отправки инвойса для {c.from_user.id}: {e}")
-        await c.answer("Произошла ошибка при создании счета. Попробуйте позже.", show_alert=True)
-# =====================================================
-# PAYMENT
-# =====================================================
-
 @dp.pre_checkout_query()
-async def pre(q: PreCheckoutQuery):
-    await q.answer(True)
+async def process_pre_checkout(q: PreCheckoutQuery):
+    await q.answer(ok=True)
 
 @dp.message(F.successful_payment)
-async def paid(m: Message):
+async def process_successful_payment(m: Message):
+    user_id = m.from_user.id
+    payload = m.successful_payment.invoice_payload
+    
+    # Извлекаем язык из payload инвойса
     try:
-        user_id = m.from_user.id
-        
-        # Защита на случай, если юзера почему-то нет в RAM (например, после перезапуска)
-        u = users.get(user_id, {"lang": "en"})
-        lang = u["lang"] if u["lang"] else "en"
+        lang = payload.split("_")[-1]
+    except Exception:
+        lang = "en"
 
-        paid_users.add(user_id)
-        
-        if user_id in tasks:
-            tasks[user_id].cancel()
-            tasks.pop(user_id, None) # Чистим память сразу
+    # Гасим фоновые дожимы
+    if user_id in active_tasks:
+        active_tasks[user_id].cancel()
+        active_tasks.pop(user_id, None)
 
-        await m.answer(
-            f"{TEXTS[lang]['thanks']}\n\n{PRIVATE_LINK}"
-        )
+    # Обновляем статус в Supabase
+    asyncio.create_task(update_payment_status(user_id))
 
-    except Exception as e:
-        logging.exception(e)
+    # Уведомление админа
+    if ADMIN_ID:
+        try:
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"💰 <b>Успешная оплата (Stars)!</b>\nID: <code>{user_id}</code>\nСумма: {m.successful_payment.total_amount} XTR"
+            )
+        except Exception:
+            pass
+
+    await m.answer(text=f"{TEXTS[lang]['thanks']}\n\n{PRIVATE_LINK}")
 
 # =====================================================
-# ADMIN FORWARD
+# LIVECHAT BACK-AND-FORTH (ADMIN INTERACTION)
 # =====================================================
-
-@dp.message(F.text)
-async def to_admin(m: Message):
+@dp.message(F.text & ~F.text.startswith("/"))
+async def forward_to_admin(m: Message):
     if m.from_user.id == ADMIN_ID:
         return
+    if ADMIN_ID:
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"✉️ <b>Сообщение от пользователя</b> <code>{m.from_user.id}</code>:\n\n{m.text}"
+        )
 
-    await bot.send_message(
-        ADMIN_ID,
-        f"ID:{m.from_user.id} | {m.text}",
-    )
-
-# =====================================================
-# ADMIN REPLY
-# =====================================================
-
-@dp.message(F.reply_to_message)
-async def reply(m: Message):
-    if m.from_user.id != ADMIN_ID:
-        return
-
-    match = re.search(r"ID:(\d+)", m.reply_to_message.text or "")
-    if not match:
-        return
-
-    uid = int(match.group(1))
-
-    await bot.send_message(uid, m.text)
+@dp.message(F.reply_to_message & (F.chat.id == ADMIN_ID))
+async def reply_from_admin(m: Message):
+    match = re.search(r"(\d{6,15})", m.reply_to_message.text or "")
+    if match:
+        user_id = int(match.group(1))
+        try:
+            await bot.send_message(chat_id=user_id, text=m.text)
+            await m.reply("✅ Отправлено")
+        except Exception as e:
+            await m.reply(f"❌ Не отправлено: {e}")
 
 # =====================================================
-# MAIN
+# WEB SERVER & INITIALIZATION
 # =====================================================
+async def handle_ping(request):
+    return web.Response(text="OK")
 
 async def main():
-    await start_web()
+    # Запуск веб-сервера для UptimeRobot на Render
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    
+    logging.info(f"Keep-alive server runs on port {PORT}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
