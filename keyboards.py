@@ -5,7 +5,8 @@ def welcome_kb(lang: str, pub_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=TEXTS[lang]["pub_btn"], url=pub_url)],
-            [InlineKeyboardButton(text="🌐 Change Language / Сменить язык", callback_data="change_lang")]
+            [InlineKeyboardButton(text=TEXTS[lang]["check_btn"], callback_data=f"check_sub_{lang}")],
+            [InlineKeyboardButton(text="🌐 Language / Язык", callback_data="change_lang")]
         ]
     )
 
