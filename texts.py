@@ -1,3 +1,5 @@
+# texts.py
+
 PRICES = {
     "uk": 400,
     "ru": 400,
