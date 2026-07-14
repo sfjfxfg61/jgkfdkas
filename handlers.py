@@ -1,3 +1,5 @@
+# handlers.py
+
 import asyncio
 import logging
 from aiogram import Router, Bot, F
@@ -14,20 +16,60 @@ router = Router()
 active_funnels = {}
 
 async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
+    """Трехэтапная воронка дожима с автопроверкой оплаты на каждом шаге"""
     try:
-        await asyncio.sleep(120)  # 2 минуты удержания
+        # --- КАСАНИЕ 1: Открытие дверей (Через 2 минуты) ---
+        await asyncio.sleep(120)
+        
+        user = await db.db_get_user(user_id)
+        if not user or user.get("is_paid"):
+            return
+
         await bot.send_message(
             chat_id=user_id,
             text=TEXTS[lang]["trigger"].format(name=name),
             reply_markup=keyboards.trigger_kb(lang)
         )
+
+        # --- КАСАНИЕ 2: Социальное доказательство и FOMO (Через 30 минут) ---
+        await asyncio.sleep(1800)
+        
+        user = await db.db_get_user(user_id)
+        if not user or user.get("is_paid"):
+            return
+
+        proof_texts = {
+            "ru": "🤍 <i>«Сначала я сомневался, но то, что внутри... это изменило всё. Без цензуры, без масок.»</i> — одно из десятков сообщений, которые я получаю.\n\nДоступ открыт еще совсем недолго. Не упускай возможность узнать меня настоящую.",
+            "uk": "🤍 <i>«Спочатку я сумнівався, але те, що всередині... це змінило все. Без цензури, без масок.»</i> — одне з десятків повідомлень, які я отримую.\n\nДоступ відкритий ще зовсім трохи. Не упускай можливість дізнатися мене справжню.",
+            "en": "🤍 <i>“At first I doubted, but what's inside... it changed everything. No filters, no masks.”</i> — one of the messages I receive daily.\n\nAccess is open for a limited time. Don't miss your chance."
+        }
+        text_proof = proof_texts.get(lang, proof_texts["en"])
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=text_proof,
+            reply_markup=keyboards.trigger_kb(lang)
+        )
+
+        # --- КАСАНИЕ 3: Ультиматум и деактивация ссылки (Через 4 часа) ---
+        await asyncio.sleep(14400)
+        
+        user = await db.db_get_user(user_id)
+        if not user or user.get("is_paid"):
+            return
+
+        await bot.send_message(
+            chat_id=user_id,
+            text=TEXTS[lang]["push"],
+            reply_markup=keyboards.trigger_kb(lang)
+        )
+
     except asyncio.CancelledError:
         pass
     except TelegramForbiddenError:
-        # Юзер заблокировал бота во время ожидания дожима — удаляем его фоновый процесс
         pass
     except Exception as e:
-        logging.error(f"Trigger error for {user_id}: {e}")
+        logging.error(f"Error in automated funnel for {user_id}: {e}")
     finally:
         active_funnels.pop(user_id, None)
 
@@ -57,7 +99,7 @@ async def process_check_sub(c: CallbackQuery, bot: Bot):
     name = c.from_user.first_name
 
     try:
-        await c.answer("Анализ профиля...", show_alert=False)
+        await c.answer("Аналіз профілю...", show_alert=False)
         await c.message.edit_text(text=TEXTS[lang]["checking"], reply_markup=None)
     except TelegramAPIError:
         pass
@@ -216,16 +258,14 @@ async def cmd_broadcast(m: Message, command: CommandObject, bot: Bot):
             count += 1
             await asyncio.sleep(0.05)
         except TelegramForbiddenError:
-            # Юзер заблокировал бота — мы не падаем, просто пропускаем его
             pass
         except Exception:
             continue
     await m.answer(f"✅ Рассылка завершена. Доставлено: {count} писем.")
 
-# ----- КОМАНДА ДЛЯ ПРЯМОЙ ОТПРАВКИ СООБЩЕНИЯ (ПО ID) -----
 @router.message(Command("send"), F.from_user.id == config.ADMIN_ID)
 async def cmd_send_direct(m: Message, command: CommandObject, bot: Bot):
-    """Формат: /send 123456789 Привет, твой текст"""
+    """Формат: /send 123456789 Твой текст сообщения любого объема"""
     if not command.args:
         return await m.answer("Использование: <code>/send [ID] [Текст сообщения]</code>")
     
@@ -238,17 +278,16 @@ async def cmd_send_direct(m: Message, command: CommandObject, bot: Bot):
     
     try:
         await bot.send_message(chat_id=target_id, text=text_to_send)
-        await m.reply(f"✅ Сообщение успешно доставлено пользователю <code>{target_id}</code>")
+        await m.reply(f"✅ Доставлено пользователю <code>{target_id}</code>")
     except TelegramForbiddenError:
-        await m.reply(f"❌ Доставка не удалась: Пользователь <code>{target_id}</code> заблокировал бота.")
+        await m.reply(f"❌ Юзер <code>{target_id}</code> заблокировал бота.")
     except Exception as e:
         await m.reply(f"❌ Ошибка отправки: {e}")
 
-# ----- ОЧИСТКА МЕРТВЫХ ДУШ (БЕЗОПАСНАЯ ФУНКЦИЯ ДЛЯ БАЗЫ) -----
 @router.message(Command("cleanup"), F.from_user.id == config.ADMIN_ID)
 async def cmd_cleanup_database(m: Message, bot: Bot):
-    """Проверяет всех неоплаченных юзеров в БД. Те, кто заблокировали бота, удаляются."""
-    await m.answer("🧹 Начинаю диагностику базы данных на мертвые профили. Это может занять время...")
+    """Очищает базу данных от тех, кто заблокировал бота"""
+    await m.answer("🧹 Начинаю чистку базы от заблокировавших бота... Это может занять время.")
     unpaid_users = await db.db_get_unpaid_users()
     
     removed_count = 0
@@ -258,22 +297,18 @@ async def cmd_cleanup_database(m: Message, bot: Bot):
         uid = u["user_id"]
         checked_count += 1
         try:
-            # Делаем имитацию активности "Печатает..." (это быстро, бесплатно и не беспокоит юзера сообщением)
             await bot.send_chat_action(chat_id=uid, action="typing")
-            await asyncio.sleep(0.05) # Не превышаем лимиты TG API
+            await asyncio.sleep(0.05)
         except TelegramForbiddenError:
-            # Юзер удалил или заблокировал бота — стираем его запись из базы, очищая бесплатное место
             await db.db_delete_user(uid)
             removed_count += 1
         except Exception:
-            # Остальные временные ошибки сети игнорируем
             pass
             
     await m.answer(
         f"✅ <b>Очистка завершена!</b>\n"
-        f"🔍 Проверено профилей: <b>{checked_count}</b>\n"
-        f"🗑 Удалено мертвых душ (кто заблокировал бота): <b>{removed_count}</b>\n\n"
-        f"Память в Supabase успешно освобождена!"
+        f"🔍 Проверено: <b>{checked_count}</b>\n"
+        f"🗑 Удалено из базы: <b>{removed_count}</b>"
     )
 
 # ==================== ЛАЙВ-ЧАТ ====================
@@ -305,6 +340,6 @@ async def reply_from_admin(m: Message, bot: Bot):
         await bot.send_message(chat_id=user_id, text=m.text)
         await m.reply(f"🚀 <b>Ответ отправлен юзеру</b> (<code>{user_id}</code>)")
     except TelegramForbiddenError:
-        await m.reply(f"❌ Отправка не удалась. Юзер <code>{user_id}</code> удалил диалог или заблокировал бота.")
+        await m.reply(f"❌ Ошибка: Юзер <code>{user_id}</code> заблокировал бота.")
     except Exception as e:
-        await m.reply(f"❌ Ошибка отправки: {e}")
+        await m.reply(f"❌ Ошибка: {e}")
