@@ -1,23 +1,20 @@
 import asyncio
 import logging
-import re
 from aiogram import Router, Bot, F
-from aiogram.filters import CommandStart, CommandObject
+from aiogram.filters import CommandStart, CommandObject, Command
 from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery
 
 import config
-from database import db_upsert_user, db_set_paid_status
+import database as db
 from texts import TEXTS, get_user_lang, get_price
 import keyboards
 
 router = Router()
-active_funnels = {}  # Карта запущенных тасков дожима в оперативной памяти
+active_funnels = {}
 
 async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
-    """Фоновый таймер дожима: триггер срабатывает через 120 секунд после клика 'Я подписался'"""
     try:
-        await asyncio.sleep(120)  # Психологическое время удержания — 2 минуты
-        
+        await asyncio.sleep(120) # 2 минуты интриги
         await bot.send_message(
             chat_id=user_id,
             text=TEXTS[lang]["trigger"].format(name=name),
@@ -26,7 +23,7 @@ async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        logging.error(f"Error in funnel for user {user_id}: {e}")
+        logging.error(f"Trigger error for {user_id}: {e}")
     finally:
         active_funnels.pop(user_id, None)
 
@@ -38,8 +35,7 @@ async def cmd_start(m: Message, command: CommandObject):
     name = m.from_user.first_name
     username = f"@{m.from_user.username}" if m.from_user.username else "None"
 
-    # Асинхронное сохранение в Supabase
-    asyncio.create_task(db_upsert_user(user_id, username, name, lang, ref))
+    asyncio.create_task(db.db_upsert_user(user_id, username, name, lang, ref))
     pub_url = config.PUBLIC_CHANNELS.get(lang, config.PUBLIC_CHANNELS["en"])
 
     await m.answer(
@@ -53,16 +49,9 @@ async def process_check_sub(c: CallbackQuery, bot: Bot):
     user_id = c.from_user.id
     name = c.from_user.first_name
 
-    # Анимация уведомления в самом Telegram (фидбек клика)
-    await c.answer("Анкета обрабатывается...", show_alert=False)
+    await c.answer("Анализ профиля...", show_alert=False)
+    await c.message.edit_text(text=TEXTS[lang]["checking"], reply_markup=None)
 
-    # Имитируем «проверку профиля», переключая интерфейс
-    await c.message.edit_text(
-        text=TEXTS[lang]["checking"],
-        reply_markup=None  # Убираем кнопки, фиксируя внимание на тексте ожидания
-    )
-
-    # Запускаем фоновый дожим на 2 минуты
     if user_id in active_funnels:
         active_funnels[user_id].cancel()
     active_funnels[user_id] = asyncio.create_task(run_delayed_trigger(bot, user_id, name, lang))
@@ -77,11 +66,7 @@ async def process_set_lang(c: CallbackQuery):
     lang = c.data.split("_")[-1]
     name = c.from_user.first_name
     pub_url = config.PUBLIC_CHANNELS.get(lang, config.PUBLIC_CHANNELS["en"])
-
-    await c.message.edit_text(
-        text=TEXTS[lang]["welcome"].format(name=name),
-        reply_markup=keyboards.welcome_kb(lang, pub_url)
-    )
+    await c.message.edit_text(text=TEXTS[lang]["welcome"].format(name=name), reply_markup=keyboards.welcome_kb(lang, pub_url))
     await c.answer()
 
 @router.callback_query(F.data.startswith("buy_trigger_"))
@@ -95,7 +80,7 @@ async def process_buy(c: CallbackQuery, bot: Bot):
             username = f"@{c.from_user.username}" if c.from_user.username else "No User"
             await bot.send_message(
                 chat_id=config.ADMIN_ID,
-                text=f"🔥 <b>Клик по инвойсу (Stars):</b>\nID: <code>{user_id}</code>\nЮзер: {username}\nГео: {lang.upper()}"
+                text=f"⚡️ <b>Переход к оплате:</b>\nID: <code>{user_id}</code>\nЮзер: {username}\nГео: {lang.upper()}"
             )
         except Exception:
             pass
@@ -120,48 +105,120 @@ async def process_pre_checkout(q: PreCheckoutQuery):
 async def process_successful_payment(m: Message, bot: Bot):
     user_id = m.from_user.id
     payload = m.successful_payment.invoice_payload
-    
     try:
         lang = payload.split("_")[-1]
     except Exception:
         lang = "en"
 
-    # Гасим фоновый таймер дожима, так как человек купил
     if user_id in active_funnels:
         active_funnels[user_id].cancel()
         active_funnels.pop(user_id, None)
 
-    # Асинхронно обновляем статус оплаты в Supabase
-    asyncio.create_task(db_set_paid_status(user_id))
+    asyncio.create_task(db.db_set_paid_status(user_id, True))
 
     if config.ADMIN_ID:
         try:
             await bot.send_message(
                 chat_id=config.ADMIN_ID,
-                text=f"💰 <b>УСПЕШНАЯ ОПЛАТА!</b>\nЮзер: <code>{user_id}</code>\nСумма: {m.successful_payment.total_amount} XTR"
+                text=f"💰 <b>ПРОДАЖА!</b>\nЮзер: <code>{user_id}</code>\nСумма: {m.successful_payment.total_amount} Stars"
             )
         except Exception:
             pass
 
     await m.answer(text=f"{TEXTS[lang]['thanks']}\n\n{config.PRIVATE_CHANNEL_URL}")
 
-# ЛАЙВ-ЧАТ ДЛЯ СВЯЗИ С АДМИНИСТРАТОРОМ
+# ==================== АДМИН-ПАНЕЛЬ И КОМАНДЫ ====================
+
+@router.message(Command("stats"), F.from_user.id == config.ADMIN_ID)
+async def cmd_stats(m: Message):
+    st = await db.db_get_stats()
+    if not st:
+        return await m.answer("Ошибка получения статистики.")
+    
+    ref_text = "\n".join([f" ├ <code>{k}</code>: {v} уников" for k, v in st['refs'].items()])
+    text = (
+        f"📊 <b>СТАТИСТИКА БОТА:</b>\n\n"
+        f"👥 Всего пользователей: <b>{st['total']}</b>\n"
+        f"💰 Оплатили приватку: <b>{st['paid']}</b>\n"
+        f"📉 Конверсия в оплату: <b>{round((st['paid']/max(st['total'],1))*100, 1)}%</b>\n\n"
+        f"🔗 <b>Реферальные хвосты:</b>\n{ref_text}"
+    )
+    await m.answer(text)
+
+@router.message(Command("user"), F.from_user.id == config.ADMIN_ID)
+async def cmd_user(m: Message, command: CommandObject):
+    if not command.args or not command.args.isdigit():
+        return await m.answer("Формат: <code>/user 123456789</code>")
+    uid = int(command.args)
+    u = await db.db_get_user(uid)
+    if not u:
+        return await m.answer("Пользователь не найден в базе.")
+    
+    text = (
+        f"👤 <b>Профиль юзера:</b>\n"
+        f"ID: <code>{u['user_id']}</code>\n"
+        f"Имя: {u['first_name']}\n"
+        f"Телега: {u['username']}\n"
+        f"Язык: <code>{u['lang']}</code>\n"
+        f"Реф: <code>{u['ref']}</code>\n"
+        f"Статус оплаты: <b>{'✅ Оплачено' if u['is_paid'] else '❌ Не оплачено'}</b>"
+    )
+    await m.answer(text, reply_markup=keyboards.admin_user_kb(uid, u['is_paid']))
+
+@router.callback_query(F.data.startswith("adm_toggle_"), F.from_user.id == config.ADMIN_ID)
+async def process_toggle_pay(c: CallbackQuery):
+    _, action, uid = c.data.split("_")
+    uid = int(uid)
+    new_status = (action == "give")
+    await db.db_set_paid_status(uid, new_status)
+    await c.message.edit_text(f"Статус оплаты для <code>{uid}</code> изменен на: <b>{new_status}</b>")
+    await c.answer("Статус обновлен")
+
+@router.message(Command("broadcast"), F.from_user.id == config.ADMIN_ID)
+async def cmd_broadcast(m: Message, command: CommandObject, bot: Bot):
+    """Глобальная рассылка ручного месседжа по всей базе"""
+    if not command.args:
+        return await m.answer("Формат: <code>/broadcast Текст вашей рассылки</code>")
+    
+    unpaid_users = await db.db_get_unpaid_users()
+    await m.answer(f"🚀 Запускаю ручную рассылку на {len(unpaid_users)} пользователей...")
+    
+    count = 0
+    for u in unpaid_users:
+        try:
+            await bot.send_message(chat_id=u["user_id"], text=command.args)
+            count += 1
+            await asyncio.sleep(0.05) # Защита от Flood Control
+        except Exception:
+            continue
+    await m.answer(f"✅ Рассылка завершена. Успешно доставлено: {count} писем.")
+
+# ==================== ИСПРАВЛЕННЫЙ ЛАЙВ-ЧАТ ====================
+
 @router.message(F.text & ~F.text.startswith("/"))
 async def forward_to_admin(m: Message, bot: Bot):
-    if m.from_user.id == config.ADMIN_ID or not config.ADMIN_ID:
+    if m.from_user.id == config.ADMIN_ID:
         return
+    # Пересылаем админу сообщение с ЖЕСТКИМ детерминированным префиксом в ПЕРВОЙ строке
     await bot.send_message(
         chat_id=config.ADMIN_ID,
-        text=f"✉️ <b>Сообщение от</b> <code>{m.from_user.id}</code>:\n\n{m.text}"
+        text=f"✉️ <b>TICKET_ID:</b> <code>{m.from_user.id}</code>\n"
+             f"👤 От: {m.from_user.first_name}\n\n"
+             f"{m.text}"
     )
 
 @router.message(F.reply_to_message & (F.chat.id == config.ADMIN_ID))
 async def reply_from_admin(m: Message, bot: Bot):
-    match = re.search(r"(\d{6,15})", m.reply_to_message.text or "")
-    if match:
-        user_id = int(match.group(1))
-        try:
-            await bot.send_message(chat_id=user_id, text=m.text)
-            await m.reply("✅ Отправлено")
-        except Exception as e:
-            await m.reply(f"❌ Ошибка отправки: {e}")
+    # Достаем ID строго из первой строчки пересланного сообщения
+    reply_text = m.reply_to_message.text or ""
+    if "TICKET_ID:" not in reply_text:
+        return # Админ просто общается в своем чате, не реплай на тикет
+    
+    try:
+        first_line = reply_text.split("\n")[0]
+        user_id = int(first_line.replace("✉️ TICKET_ID:", "").strip())
+        
+        await bot.send_message(chat_id=user_id, text=m.text)
+        await m.reply(f"🚀 <b>Ответ отправлен юзеру</b> (<code>{user_id}</code>)")
+    except Exception as e:
+        await m.reply(f"❌ Не удалось отправить ответ: {e}")
