@@ -1,3 +1,5 @@
+# middlewares.py
+
 import time
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, CallbackQuery, Message
@@ -19,10 +21,9 @@ class AntiFloodMiddleware(BaseMiddleware):
             now = time.time()
             last_time = self.users.get(user_id, 0)
             if now - last_time < self.limit:
-                # Юзер кликает слишком быстро — игнорируем запрос, защищая сервер
                 if isinstance(event, CallbackQuery):
                     try:
-                        await event.answer("⚠️ Не кликайте так часто!", show_alert=True)
+                        await event.answer("⚠️ Пожалуйста, не нажимайте кнопки так быстро!", show_alert=True)
                     except Exception:
                         pass
                 return
