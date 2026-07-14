@@ -28,3 +28,12 @@ def languages_kb() -> InlineKeyboardMarkup:
              InlineKeyboardButton(text="🇪🇸 Español", callback_data="set_lang_es")]
         ]
     )
+
+def admin_user_kb(user_id: int, is_paid: bool) -> InlineKeyboardMarkup:
+    btn_text = "❌ Забрать приват" if is_paid else "✅ Выдать приват (Чек)"
+    callback_action = "take" if is_paid else "give"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text=btn_text, callback_data=f"adm_{callback_action}_{user_id}")
+        ]]
+    )
