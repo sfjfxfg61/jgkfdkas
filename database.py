@@ -10,7 +10,6 @@ def get_headers():
     }
 
 async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str, ref: str):
-    """Сохранение или обновление пользователя (Оптимизирован по памяти)"""
     url = f"{SUPABASE_URL}/rest/v1/users"
     headers = get_headers()
     headers["Prefer"] = "resolution=merge-duplicates"
@@ -31,7 +30,6 @@ async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str
             logging.error(f"Failed to upsert user {user_id}: {e}")
 
 async def db_set_paid_status(user_id: int, status: bool = True):
-    """Активация или деактивация платного статуса"""
     url = f"{SUPABASE_URL}/rest/v1/users?user_id=eq.{user_id}"
     async with aiohttp.ClientSession() as session:
         try:
@@ -42,7 +40,6 @@ async def db_set_paid_status(user_id: int, status: bool = True):
             logging.error(f"Failed to update paid status for {user_id}: {e}")
 
 async def db_get_stats():
-    """Получение глобальной и реферальной статистики за один проход"""
     url = f"{SUPABASE_URL}/rest/v1/users?select=is_paid,ref"
     async with aiohttp.ClientSession() as session:
         try:
@@ -62,7 +59,6 @@ async def db_get_stats():
     return None
 
 async def db_get_unpaid_users():
-    """Выборка структуры неоплаченных пользователей для рассылки дожима"""
     url = f"{SUPABASE_URL}/rest/v1/users?is_paid=eq.false&select=user_id,lang"
     async with aiohttp.ClientSession() as session:
         try:
@@ -74,7 +70,6 @@ async def db_get_unpaid_users():
     return []
 
 async def db_get_user(user_id: int):
-    """Получить карточку пользователя по ID"""
     url = f"{SUPABASE_URL}/rest/v1/users?user_id=eq.{user_id}&select=*"
     async with aiohttp.ClientSession() as session:
         try:
@@ -85,3 +80,14 @@ async def db_get_user(user_id: int):
         except Exception as e:
             logging.error(f"Fetch user failed: {e}")
     return None
+
+async def db_delete_user(user_id: int):
+    """Полное удаление неактивного юзера (Очистка БД)"""
+    url = f"{SUPABASE_URL}/rest/v1/users?user_id=eq.{user_id}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.delete(url, headers=get_headers()) as resp:
+                if resp.status not in [200, 204]:
+                    logging.error(f"Supabase delete user error: {await resp.text()}")
+        except Exception as e:
+            logging.error(f"Failed to delete user {user_id}: {e}")
