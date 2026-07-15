@@ -24,7 +24,7 @@ async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
     """
     try:
         # --- КАСАНИЕ 1 (Через 2 минуты после подписки) ---
-        await asyncio.sleep(120)
+        await asyncio.sleep(30)
         
         user = await db.db_get_user(user_id)
         if not user or user.get("is_paid"):
