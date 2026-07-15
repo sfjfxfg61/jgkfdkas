@@ -1,16 +1,20 @@
 # texts.py
 
-PRICES = {
-    "uk": 400,
-    "ru": 400,
-    "es": 750,
-    "fr": 1000,
-    "de": 1200,
-    "en": 1000,
+# Сетка тарифов для разных ГЕО (в Telegram Stars)
+# test: 7 дней, lifetime: навсегда (основной), vip: премиум-якорь (создает контраст цен)
+TARIFF_PRICES = {
+    "uk": {"test": 250, "lifetime": 400, "vip": 1200},
+    "ru": {"test": 250, "lifetime": 400, "vip": 1200},
+    "en": {"test": 600, "lifetime": 1000, "vip": 3000},
+    "es": {"test": 450, "lifetime": 750, "vip": 2200},
+    "fr": {"test": 600, "lifetime": 1000, "vip": 3000},
+    "de": {"test": 700, "lifetime": 1200, "vip": 3500},
 }
 
-def get_price(lang: str) -> int:
-    return PRICES.get(lang, 1000)
+def get_tariff_price(lang: str, tier: str) -> int:
+    """Безопасное и быстрое получение цены тарифа с фоллбеком на английский"""
+    geos = TARIFF_PRICES.get(lang, TARIFF_PRICES["en"])
+    return geos.get(tier, geos["lifetime"])
 
 TEXTS = {
     "uk": {
@@ -36,11 +40,10 @@ TEXTS = {
             "Там немає цензури, масок чи спроб подобатися усім. Тільки моє справжнє життя, "
             "особисті моменти та думки, які ніколи не з'являться на публіці.\n\n"
             "🔑 <i>Доступ туди обмежений. Я впускаю лише тих, хто відчуває мою енергетику.</i> "
-            "Якщо ти готовий побачити мене справжньою — твої двері відчинені прямо зараз."
+            "Обери свій формат участі нижче 👇"
         ),
-        "buy_btn": "✨ Зазирнути у приватний простір",
-        "invoice_title": "Приватний простір",
-        "invoice_desc": "Повний пожиттєвий доступ до закритих матеріалів без цензури.",
+        "invoice_title": "Приватний простір ({tier_name})",
+        "invoice_desc": "Доступ до закритих матеріалів без цензури за обраним тарифом.",
         "thanks": (
             "Дякую, що ти зі мною 🤍\n\n"
             "Твій персональний доступ активовано назавжди. "
@@ -52,7 +55,11 @@ TEXTS = {
             "Можливо, це просто не твоє, і це нормально.\n\n"
             "Але май на увазі: через декілька годин це динамічне посилання буде видалено системою. "
             "Другої спроби потрапити туди та побачити мене без фільтрів не буде. Твій останній шанс 👇"
-        )
+        ),
+        "tier_test": "⏳ Тест-драйв (7 днів)",
+        "tier_lifetime": "💎 Безліміт НАВЖИВНО",
+        "tier_vip": "👑 VIP (Доступ + Особистий чат)",
+        "select_tier_text": "🏷 <b>Оберіть формат доступу:</b>"
     },
     "ru": {
         "welcome": (
@@ -77,11 +84,10 @@ TEXTS = {
             "Там нет цензуры, масок или попыток нравиться всем. Только моя настоящая жизнь, "
             "личные моменты и мысли, которые никогда не появятся публично.\n\n"
             "🔑 <i>Доступ туда строго ограничен. Я впускаю только тех, кто чувствует мою энергетику.</i> "
-            "Если ты готов увидеть меня настоящую — твоя дверь открыта прямо сейчас."
+            "Выбери свой формат участия ниже 👇"
         ),
-        "buy_btn": "✨ Заглянуть в приватное пространство",
-        "invoice_title": "Приватное пространство",
-        "invoice_desc": "Полный пожизненный доступ к закрытым материалам без цензуры.",
+        "invoice_title": "Приватное пространство ({tier_name})",
+        "invoice_desc": "Доступ к закрытым материалам без цензуры по выбранному тарифу.",
         "thanks": (
             "Спасибо, что ты со мной 🤍\n\n"
             "Твой персональный доступ активирован навсегда. "
@@ -93,7 +99,11 @@ TEXTS = {
             "Возможно, это просто не твоё, и это нормально.\n\n"
             "Но имей в виду: через несколько часов эта динамическая ссылка будет удалена системой. "
             "Второй попытки попасть туда и увидеть меня без фильтров уже не будет. Твой последний шанс 👇"
-        )
+        ),
+        "tier_test": "⏳ Тест-драйв (7 дней)",
+        "tier_lifetime": "💎 Безлимит НАВСЕГДА",
+        "tier_vip": "👑 VIP (Доступ + Личный чат)",
+        "select_tier_text": "🏷 <b>Выберите формат доступа:</b>"
     },
     "en": {
         "welcome": (
@@ -117,12 +127,10 @@ TEXTS = {
             "I have a completely private, hidden space.\n\n"
             "No censorship, no filters, and no trying to please everyone. Just my real life, "
             "personal moments, and raw thoughts that will never be shared publicly.\n\n"
-            "🔑 <i>Only a select few are allowed inside.</i> If you feel my energy and "
-            "want to see the real me — your door is open right now."
+            "🔑 <i>Only a select few are allowed inside.</i> Choose your access level below 👇"
         ),
-        "buy_btn": "✨ Enter Private Space",
-        "invoice_title": "Private Space",
-        "invoice_desc": "Full lifetime access to exclusive uncensored content.",
+        "invoice_title": "Private Space ({tier_name})",
+        "invoice_desc": "Access to exclusive uncensored content based on your choice.",
         "thanks": (
             "Thank you for being with me 🤍\n\n"
             "Your personal access has been activated permanently. "
@@ -134,138 +142,156 @@ TEXTS = {
             "Maybe it's just not your vibe, and that's totally fine.\n\n"
             "But keep in mind: in a few hours, this invitation link will be permanently deactivated. "
             "There won't be a second chance to see me unfiltered. Your final call 👇"
-        )
+        ),
+        "tier_test": "⏳ Trial Pass (7 Days)",
+        "tier_lifetime": "💎 Lifetime Access",
+        "tier_vip": "👑 VIP Access + Private Chat",
+        "select_tier_text": "🏷 <b>Choose your access level:</b>"
+    },
+    "es": {
+        "welcome": (
+            "Hola, {name} 🤍\n\n"
+            "Qué alegría verte aquí. Tu solicitud de entrada ha sido recibida.\n\n"
+            "Para activar el sistema y verificar que tu perfil es real, "
+            "debes completar un paso muy sencillo:\n\n"
+            "📢 <b>Suscríbete a mi canal oficial</b> con mis pensamientos y vibra, "
+            "luego haz clic en el botón de abajo. Esto desbloqueará la siguiente etapa 👇"
+        ),
+        "pub_btn": "📢 Unirse al Canal",
+        "check_btn": "Ya me suscribí, ¿qué sigue? 🤍",
+        "checking": (
+            "⏳ <b>Analizando perfil...</b>\n\n"
+            "Por favor, espera unos segundos. El sistema está verificando tu suscripción "
+            "y preparando tu acceso personal. No apagues las notificaciones."
+        ),
+        "trigger": (
+            "<b>Verificación exitosa. Acceso concedido</b> 🤍\n\n"
+            "Mientras exploras mi canal público, quiero mostrarte algo diferente. "
+            "Tengo un espacio completamente privado y oculto.\n\n"
+            "Sin censura, sin filtros y sin intentar complacer a todos. Solo mi vida real, "
+            "momentos personales y pensamientos puros que nunca compartiré en público.\n\n"
+            "🔑 <i>El acceso es muy limitado. Solo dejo entrar a quienes sienten mi energía.</i> "
+            "Elige tu nivel de acceso abajo 👇"
+        ),
+        "invoice_title": "Espacio Privado ({tier_name})",
+        "invoice_desc": "Acceso a contenido exclusivo sin censura según el plan elegido.",
+        "thanks": (
+            "Gracias por estar conmigo 🤍\n\n"
+            "Tu acceso personal ha sido activado para siempre. "
+            "Entra a tu espacio privado a través del enlace de abajo:"
+        ),
+        "push": (
+            "⏳ <b>Tu invitación está por expirar...</b>\n\n"
+            "Noté que te interesó mi espacio privado, pero dudaste en entrar. "
+            "Tal vez no sea tu estilo, y eso está totalmente bien.\n\n"
+            "Pero ten en cuenta: en unas pocas horas, este enlace de invitación se desactivará. "
+            "No habrá una segunda oportunidad para verme sin filtros. Tu última decisión 👇"
+        ),
+        "tier_test": "⏳ Pase de Prueba (7 Días)",
+        "tier_lifetime": "💎 Acceso de por Vida",
+        "tier_vip": "👑 Acceso VIP + Chat Privado",
+        "select_tier_text": "🏷 <b>Elige tu nivel de acceso:</b>"
+    },
+    "fr": {
+        "welcome": (
+            "Salut, {name} 🤍\n\n"
+            "Ravi de te voir ici. Ta demande d'accès a bien été reçue.\n\n"
+            "Pour activer le système et prouver que ton profil est réel, "
+            "tu dois accomplir une étape très simple :\n\n"
+            "📢 <b>Abonne-toi à mon canal officiel</b> pour t'imprégner de mes pensées et de mon univers, "
+            "puis clique sur le bouton ci-dessous. Cela débloquera la suite 👇"
+        ),
+        "pub_btn": "📢 Rejoindre le Canal",
+        "check_btn": "Je suis abonné, et après ? 🤍",
+        "checking": (
+            "⏳ <b>Analyse du profil...</b>\n\n"
+            "Veuillez patienter quelques secondes. Le système vérifie votre abonnement "
+            "et prépare votre accès personnalisé. Restez connecté."
+        ),
+        "trigger": (
+            "<b>Vérification réussie. Accès accordé</b> 🤍\n\n"
+            "Pendant que tu découvres mon canal public, je veux te montrer autre chose. "
+            "J'ai créé un espace entièrement privé et secret.\n\n"
+            "Pas de censure, pas de filtres, et aucune envie de plaire à tout le monde. Juste ma vraie vie, "
+            "mes moments intimes et mes pensées brutes qui ne seront jamais publiés ailleurs.\n\n"
+            "🔑 <i>L'accès est très restreint. Je ne laisse entrer que ceux qui partagent ma vibe.</i> "
+            "Choisis ton niveau d'accès ci-dessous 👇"
+        ),
+        "invoice_title": "Espace Privé ({tier_name})",
+        "invoice_desc": "Accès au contenu exclusif sans censure selon le plan choisi.",
+        "thanks": (
+            "Merci d'être avec moi 🤍\n\n"
+            "Ton accès personnel a été activé définitivement. "
+            "Rejoins ton espace privé via le lien ci-dessous :"
+        ),
+        "push": (
+            "⏳ <b>Ton invitation va expirer...</b>\n\n"
+            "J'ai remarqué que tu t'intéressais à mon espace privé, mais que tu as hésité. "
+            "Peut-être que ce n'est pas pour toi, et c'est tout à fait normal.\n\n"
+            "Sache cependant que dans quelques heures, ce lien d'invitation sera désactivé. "
+            "Il n'y aura pas de seconde chance pour me voir sans filtre. Ton dernier choix 👇"
+        ),
+        "tier_test": "⏳ Pass d'Essai (7 Jours)",
+        "tier_lifetime": "💎 Accès à Vie",
+        "tier_vip": "👑 Accès VIP + Chat Privé",
+        "select_tier_text": "🏷 <b>Choisis ton niveau d'accès :</b>"
     },
     "de": {
         "welcome": (
             "Hallo, {name} 🤍\n\n"
             "Schön, dass du da bist. Deine Beitrittsanfrage wurde empfangen.\n\n"
             "Um das System zu aktivieren und zu bestätigen, dass dein Profil echt ist, "
-            "musst du einen einfachen Schritt abschließen:\n\n"
-            "📢 <b>Abonniere meinen offiziellen Kanal</b> mit meinen Gedanken und meiner Ästhetik, "
-            "und klicke dann auf die Schaltfläche unten 👇"
+            "musst du nur einen einfachen Schritt machen:\n\n"
+            "📢 <b>Abonniere meinen offiziellen Kanal</b> mit meinen Gedanken und meiner Atmosphäre, "
+            "und klicke dann auf den Button unten. Das schaltet den nächsten Schritt frei 👇"
         ),
         "pub_btn": "📢 Kanal beitreten",
-        "check_btn": "Ich bin beigetreten, was jetzt? 🤍",
+        "check_btn": "Ich habe abonniert, was jetzt? 🤍",
         "checking": (
-            "⏳ <b>Profil wird analysiert...</b>\n\n"
-            "Bitte warte einen Moment. Das System überprüft dein Abonnement "
-            "und bereitet deinen persönlichen Zugang vor."
+            "⏳ <b>Profil-Analyse...</b>\n\n"
+            "Bitte warte einige Sekunden. Das System überprüft dein Abonnement "
+            "und bereitet deinen persönlichen Zugang vor. Benachrichtigungen nicht ausschalten."
         ),
         "trigger": (
-            "<b>Überprüfung erfolgreich. Zugang freigeschaltet</b> 🤍\n\n"
-            "Während du meinen öffentlichen Kanal anschaust, möchte ich dir etwas Exklusives zeigen. "
-            "Ich habe einen völlig privaten, geheimen Ort.\n\n"
-            "Dort gibt es keine Zensur, keine Masken und keine Filter. Nur mein echtes Leben, "
-            "persönliche Momente und ehrliche Gedanken, die niemals öffentlich werden.\n\n"
-            "🔑 <i>Der Zugang ist streng limitiert.</i> Wenn du meine Energie spürst "
-            "und mich ungeschminkt sehen willst — deine Tür steht jetzt offen."
+            "<b>Verifizierung erfolgreich. Zugang gewährt</b> 🤍\n\n"
+            "Während du meinen öffentlichen Kanal erkundest, möchte ich dir etwas anderes zeigen. "
+            "Ich habe einen völlig privaten, exklusiven Bereich.\n\n"
+            "Ohne Zensur, ohne Filter und ohne den Versuch, allen zu gefallen. Nur mein echtes Leben, "
+            "persönliche Momente und Gedanken, die niemals öffentlich geteilt werden.\n\n"
+            "🔑 <i>Der Zugang ist streng limitiert. Nur für diejenigen, die meine Energie spüren.</i> "
+            "Wähle jetzt deinen Zugang 👇"
         ),
-        "buy_btn": "✨ Privaten Raum betreten",
-        "invoice_title": "Privater Raum",
-        "invoice_desc": "Lebenslanger Zugang zu exklusiven unzensierten Inhalten.",
+        "invoice_title": "Privater Bereich ({tier_name})",
+        "invoice_desc": "Zugang zu exklusiven, unzensierten Inhalten basierend auf deiner Wahl.",
         "thanks": (
-            "Schön, dass du an meiner Seite bist 🤍\n\n"
-            "Dein persönlicher Zugang ist dauerhaft aktiv. "
-            "Tritt dem privaten Kreis über den folgenden Link bei:"
+            "Danke, dass du bei mir bist 🤍\n\n"
+            "Dein persönlicher Zugang wurde dauerhaft freigeschaltet. "
+            "Tritt deinem privaten Bereich über den Link unten bei:"
         ),
         "push": (
             "⏳ <b>Deine Einladung läuft ab...</b>\n\n"
-            "Ich habe bemerkt, dass du Interesse an meinem privaten Raum hattest, aber zögerst. "
-            "Vielleicht ist es nicht dein Vibe, und das ist völlig okay.\n\n"
-            "Aber denk daran: In wenigen Stunden wird dieser Link dauerhaft gelöscht. "
-            "Es wird keine zweite Chance geben, mich ungefiltert zu sehen. Deine letzte Chance 👇"
-        )
-    },
-    "fr": {
-        "welcome": (
-            "Bonjour, {name} 🤍\n\n"
-            "Ravi de te voir ici. Ta demande d'entrée a été reçue.\n\n"
-            "Pour activer le système et valider ton profil, "
-            "il te suffit de compléter cette étape simple :\n\n"
-            "📢 <b>Rejoins mon canal officiel</b> avec mes pensées et mon univers, "
-            "puis clique sur le bouton ci-dessous 👇"
+            "Ich habe bemerkt, dass du Interesse an meinem privaten Bereich hattest, aber gezögert hast. "
+            "Vielleicht ist es nicht dein Ding, und das ist völlig okay.\n\n"
+            "Aber denke daran: In wenigen Stunden wird dieser Einladungslink dauerhaft deaktiviert. "
+            "Es gibt keine zweite Chance, mich völlig ungefiltert zu sehen. Deine letzte Chance 👇"
         ),
-        "pub_btn": "📢 Rejoindre le canal",
-        "check_btn": "Je suis inscrit, et après ? 🤍",
-        "checking": (
-            "⏳ <b>Analyse du profil...</b>\n\n"
-            "Patiente quelques instants. Le système valide ton inscription "
-            "et prépare ton accès exclusif."
-        ),
-        "trigger": (
-            "<b>Vérification réussie. Accès autorisé</b> 🤍\n\n"
-            "Pendant que tu découvres mon canal public, je veux te montrer autre chose. "
-            "J'ai un espace entièrement privé et secret.\n\n"
-            "Ici, pas de censure, pas de faux-semblants, pas de filtres. Juste ma vraie vie, "
-            "mes moments intimes et mes pensées brutes qui ne seront jamais publiés ailleurs.\n\n"
-            "🔑 <i>L'entrée est très sélective.</i> Si tu ressens ma vibration "
-            "et veux me découvrir sans fard — ta porte est ouverte dès maintenant."
-        ),
-        "buy_btn": "✨ Entrer dans l'espace privé",
-        "invoice_title": "Espace Privé",
-        "invoice_desc": "Accès à vie complet au contenu privé et exclusif.",
-        "thanks": (
-            "Merci d'être avec moi 🤍\n\n"
-            "Ton accès personnel est activé à vie. "
-            "Rejoins l'espace secret via le lien ci-dessous :"
-        ),
-        "push": (
-            "⏳ <b>Ton invitation va être annulée...</b>\n\n"
-            "J'ai vu que tu t'intéressais à mon espace privé, mais tu as hésité. "
-            "Peut-être que ce n'est pas ton moment, et je le respecte.\n\n"
-            "Sache que dans quelques heures, ce lien dynamique sera désactivé à jamais. "
-            "Il n'y aura pas de retour en arrière pour me voir sans filtres. C'est maintenant ou jamais 👇"
-        )
-    },
-    "es": {
-        "welcome": (
-            "Hola, {name} 🤍\n\n"
-            "Qué alegría verte aquí. Tu solicitud de acceso ha sido recibida.\n\n"
-            "Para activar el sistema y confirmar que tu cuenta es real, "
-            "solo debes seguir este sencillo paso:\n\n"
-            "📢 <b>Únete a mi canal oficial</b> con mis vivencias y mi día a día, "
-            "y luego presiona el botón de abajo 👇"
-        ),
-        "pub_btn": "📢 Entrar al canal",
-        "check_btn": "Ya me uní, ¿qué sigue? 🤍",
-        "checking": (
-            "⏳ <b>Analizando perfil...</b>\n\n"
-            "Espera unos segundos. El sistema verifica tu suscripción "
-            "y prepara tu acceso personalizado."
-        ),
-        "trigger": (
-            "<b>Verificación exitosa. Acceso concedido</b> 🤍\n\n"
-            "Mientras exploras mi canal público, quiero mostrarte algo diferente. "
-            "Tengo un espacio completamente privado y oculto.\n\n"
-            "Sin censura, sin máscaras y sin filtros. Solo mi vida real, "
-            "momentos íntimos y pensamientos crudos que jamás subiré en público.\n\n"
-            "🔑 <i>El acceso es muy selectivo.</i> Si conectas con mi energía "
-            "y quieres verme al natural — tu puerta está abierta justo ahora."
-        ),
-        "buy_btn": "✨ Entrar al espacio privado",
-        "invoice_title": "Espacio Privado",
-        "invoice_desc": "Acceso total de por vida a contenido exclusivo sin censura.",
-        "thanks": (
-            "Gracias por estar aquí conmigo 🤍\n\n"
-            "Tu acceso personal ha sido activado permanentemente. "
-            "Entra al espacio secreto a través del siguiente enlace:"
-        ),
-        "push": (
-            "⏳ <b>Tu invitación está a punto de expirar...</b>\n\n"
-            "Noté que te interesó mi espacio privado, pero no te decidiste a entrar. "
-            "Tal vez no es lo que buscas, y está bien.\n\n"
-            "Ten en cuenta que en unas horas este enlace dinámico quedará inactivo para siempre. "
-            "No habrá otra oportunidad de verme sin filtros. Tu última decisión 👇"
-        )
+        "tier_test": "⏳ Testzugang (7 Tage)",
+        "tier_lifetime": "💎 Lebenslanger Zugang",
+        "tier_vip": "👑 VIP-Zugang + Privater Chat",
+        "select_tier_text": "🏷 <b>Wähle deine Zugangsstufe:</b>"
     }
 }
 
-for l in ["de", "fr", "es"]:
-    if l not in TEXTS:
-        TEXTS[l] = TEXTS["en"]
+def get_text(lang: str, key: str) -> str:
+    """
+    Умный и ультра-быстрый фоллбек.
+    Если перевод для данного языка отсутствует, мгновенно отдает английскую версию.
+    """
+    locale = TEXTS.get(lang, TEXTS["en"])
+    return locale.get(key, TEXTS["en"].get(key, ""))
 
 def get_user_lang(language_code: str) -> str:
+    """Определение языка пользователя с защитой от пустых значений"""
     if not language_code:
         return "en"
     clean_lang = language_code.lower()[:2]
