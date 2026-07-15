@@ -16,10 +16,10 @@ TABLE_URL = f"{config.SUPABASE_URL}/rest/v1/users"
 
 async def init_db():
     """
-    Для Supabase инициализация таблиц не требуется через код, 
-    так как таблица 'users' уже создана тобой в панели Supabase.
+    Для Supabase инициализация таблиц через код не требуется, 
+    так как таблица 'users' и индексы уже созданы тобой через SQL-запрос.
     """
-    logging.info("Supabase connection configured and ready.")
+    logging.info("Supabase PostgreSQL connection configured and active.")
 
 async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str, ref: str):
     """Добавление или обновление пользователя в Supabase (ON CONFLICT)"""
@@ -28,8 +28,8 @@ async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str
         "user_id": user_id,
         "username": username,
         "first_name": first_name,
-        "lang": lang,
-        "ref": ref
+        "lang": lang[:2],  # Обрезаем до 2 символов согласно VARCHAR(2)
+        "ref": ref[:50]    # Обрезаем до 50 символов согласно VARCHAR(50)
     }
     
     # Добавляем заголовок для выполнения UPSERT (обновления при конфликте)
@@ -39,7 +39,7 @@ async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, json=payload, headers=headers) as r:
-                if r.status not in [200, 201]:
+                if r.status not in [200, 201, 204]:
                     text = await r.text()
                     logging.error(f"Supabase upsert error: {r.status} - {text}")
         except Exception as e:
@@ -59,9 +59,10 @@ async def db_get_user(user_id: int) -> dict:
     return None
 
 async def db_set_paid_status(user_id: int, is_paid: bool):
-    """Обновление статуса оплаты пользователя в Supabase"""
+    """Обновление статуса оплаты пользователя в Supabase (тип BOOLEAN)"""
     url = f"{TABLE_URL}?user_id=eq.{user_id}"
-    payload = {"is_paid": 1 if is_paid else 0}
+    # Отправляем чистый Python-boolean (True/False), который aiohttp конвертирует в JSON true/false
+    payload = {"is_paid": is_paid}
     
     async with aiohttp.ClientSession() as session:
         try:
@@ -73,8 +74,11 @@ async def db_set_paid_status(user_id: int, is_paid: bool):
             logging.error(f"Supabase patch request failed: {e}")
 
 async def db_get_unpaid_users() -> list:
-    """Получение списка всех неоплативших пользователей для рассылки дожимов"""
-    url = f"{TABLE_URL}?is_paid=eq.0&select=user_id,lang"
+    """
+    Получение списка всех неоплативших пользователей для рассылки дожимов.
+    Использует созданный тобой индекс idx_users_unpaid (is_paid = false).
+    """
+    url = f"{TABLE_URL}?is_paid=eq.false&select=user_id,lang"
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, headers=HEADERS) as r:
@@ -97,8 +101,7 @@ async def db_delete_user(user_id: int):
             logging.error(f"Supabase delete connection error: {e}")
 
 async def db_get_stats() -> dict:
-    """Сбор статистики по пользователям из Supabase"""
-    # Запрашиваем только необходимые поля для минимизации трафика
+    """Сбор статистики по пользователям напрямую из Supabase"""
     url = f"{TABLE_URL}?select=is_paid,ref"
     async with aiohttp.ClientSession() as session:
         try:
@@ -107,9 +110,10 @@ async def db_get_stats() -> dict:
                     users = await r.json()
                     
                     total = len(users)
-                    paid = sum(1 for u in users if u.get("is_paid") == 1)
+                    # Считаем тех, у кого is_paid равен True
+                    paid = sum(1 for u in users if u.get("is_paid") is True)
                     
-                    # Считаем реферальные переходы
+                    # Считаем реферальные переходы из TikTok
                     refs = {}
                     for u in users:
                         ref_name = u.get("ref") or "direct"
