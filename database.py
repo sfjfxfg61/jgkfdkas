@@ -1,96 +1,126 @@
 # database.py
-import aiosqlite
-import os
+import aiohttp
 import logging
+import config
 
-DB_PATH = "bot_database.db"
+# Базовые заголовки для работы с Supabase REST API
+HEADERS = {
+    "apikey": config.SUPABASE_KEY,
+    "Authorization": f"Bearer {config.SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=minimal"
+}
+
+# Ссылка на REST-интерфейс таблиц в Supabase
+TABLE_URL = f"{config.SUPABASE_URL}/rest/v1/users"
 
 async def init_db():
-    """Инициализация базы данных, создание таблиц и индексов для мгновенного поиска"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Таблица пользователей
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                lang TEXT DEFAULT 'en',
-                ref TEXT DEFAULT 'direct',
-                is_paid INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Индекс для быстрой фильтрации неоплативших пользователей при рассылках и чистке
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_users_unpaid ON users (is_paid)")
-        # Индекс для аналитики по рефералам
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_users_ref ON users (ref)")
-        
-        await db.commit()
-    logging.info("Database initialized successfully with indexes.")
+    """
+    Для Supabase инициализация таблиц не требуется через код, 
+    так как таблица 'users' уже создана тобой в панели Supabase.
+    """
+    logging.info("Supabase connection configured and ready.")
 
 async def db_upsert_user(user_id: int, username: str, first_name: str, lang: str, ref: str):
-    """Безопасное добавление или обновление данных пользователя (ON CONFLICT)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO users (user_id, username, first_name, lang, ref)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                username = excluded.username,
-                first_name = excluded.first_name,
-                lang = excluded.lang
-        """, (user_id, username, first_name, lang, ref))
-        await db.commit()
+    """Добавление или обновление пользователя в Supabase (ON CONFLICT)"""
+    url = f"{TABLE_URL}?on_conflict=user_id"
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "first_name": first_name,
+        "lang": lang,
+        "ref": ref
+    }
+    
+    # Добавляем заголовок для выполнения UPSERT (обновления при конфликте)
+    headers = HEADERS.copy()
+    headers["Prefer"] = "resolution=merge-duplicates"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, json=payload, headers=headers) as r:
+                if r.status not in [200, 201]:
+                    text = await r.text()
+                    logging.error(f"Supabase upsert error: {r.status} - {text}")
+        except Exception as e:
+            logging.error(f"Failed to connect to Supabase: {e}")
 
 async def db_get_user(user_id: int) -> dict:
-    """Мгновенное получение карточки пользователя"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+    """Получение пользователя из Supabase по его ID"""
+    url = f"{TABLE_URL}?user_id=eq.{user_id}&select=*"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=HEADERS) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    return data[0] if data else None
+        except Exception as e:
+            logging.error(f"Supabase get_user error: {e}")
+    return None
 
 async def db_set_paid_status(user_id: int, is_paid: bool):
-    """Обновление статуса оплаты"""
-    status = 1 if is_paid else 0
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET is_paid = ? WHERE user_id = ?", (status, user_id))
-        await db.commit()
+    """Обновление статуса оплаты пользователя в Supabase"""
+    url = f"{TABLE_URL}?user_id=eq.{user_id}"
+    payload = {"is_paid": 1 if is_paid else 0}
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.patch(url, json=payload, headers=HEADERS) as r:
+                if r.status not in [200, 204]:
+                    text = await r.text()
+                    logging.error(f"Supabase set_paid error: {r.status} - {text}")
+        except Exception as e:
+            logging.error(f"Supabase patch request failed: {e}")
 
 async def db_get_unpaid_users() -> list:
-    """Быстрая выгрузка всех неоплативших пользователей (для дожимов, рассылок и чистки)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, lang FROM users WHERE is_paid = 0") as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+    """Получение списка всех неоплативших пользователей для рассылки дожимов"""
+    url = f"{TABLE_URL}?is_paid=eq.0&select=user_id,lang"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=HEADERS) as r:
+                if r.status == 200:
+                    return await r.json()
+        except Exception as e:
+            logging.error(f"Supabase get_unpaid_users error: {e}")
+    return []
 
 async def db_delete_user(user_id: int):
-    """Удаление 'мертвых душ' (пользователей, заблокировавших бота)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
-        await db.commit()
+    """Удаление пользователя (если он заблокировал бота)"""
+    url = f"{TABLE_URL}?user_id=eq.{user_id}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.delete(url, headers=HEADERS) as r:
+                if r.status not in [200, 204]:
+                    text = await r.text()
+                    logging.error(f"Supabase delete user error: {r.status} - {text}")
+        except Exception as e:
+            logging.error(f"Supabase delete connection error: {e}")
 
 async def db_get_stats() -> dict:
-    """Сбор моментальной статистики по воронке и рефералам за один проход"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        
-        # Общие показатели
-        async with db.execute("SELECT COUNT(*) as total, SUM(CASE WHEN is_paid = 1 THEN 1 ELSE 0 END) as paid FROM users") as cursor:
-            res = await cursor.fetchone()
-            total = res["total"] or 0
-            paid = res["paid"] or 0
-
-        # Статистика по реферальным источникам
-        refs = {}
-        async with db.execute("SELECT ref, COUNT(*) as cnt FROM users GROUP BY ref ORDER BY cnt DESC") as cursor:
-            rows = await cursor.fetchall()
-            for r in rows:
-                refs[r["ref"]] = r["cnt"]
-
-        return {
-            "total": total,
-            "paid": paid,
-            "refs": refs
-        }
+    """Сбор статистики по пользователям из Supabase"""
+    # Запрашиваем только необходимые поля для минимизации трафика
+    url = f"{TABLE_URL}?select=is_paid,ref"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=HEADERS) as r:
+                if r.status == 200:
+                    users = await r.json()
+                    
+                    total = len(users)
+                    paid = sum(1 for u in users if u.get("is_paid") == 1)
+                    
+                    # Считаем реферальные переходы
+                    refs = {}
+                    for u in users:
+                        ref_name = u.get("ref") or "direct"
+                        refs[ref_name] = refs.get(ref_name, 0) + 1
+                        
+                    return {
+                        "total": total,
+                        "paid": paid,
+                        "refs": refs
+                    }
+        except Exception as e:
+            logging.error(f"Supabase get_stats error: {e}")
+            
+    return {"total": 0, "paid": 0, "refs": {}}
