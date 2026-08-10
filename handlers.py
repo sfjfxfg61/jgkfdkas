@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 from aiogram import Router, Bot, F
 from aiogram.filters import CommandStart, CommandObject, Command
 from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery
@@ -15,31 +16,30 @@ from ai_closer import generate_ai_push
 
 router = Router()
 
-# Хранилище активных задач дожима
+# Хранилище задач
 active_funnels = {}
+cart_funnels = {}
 
 async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
     """
-    Высококонверсионная цепочка дожимов с генерацией ИИ-сообщений.
+    Каскадная воронка дожима (30 сек -> 30 мин -> 4 часа)
     """
     try:
-        # --- КАСАНИЕ 1 (Через 30 секунд после подписки) ---
+        # --- КАСАНИЕ 1 (через 30 секунд) ---
         await asyncio.sleep(30)
-        
         user = await db.db_get_user(user_id)
         if not user or user.get("is_paid"):
             return
 
         await bot.send_message(
             chat_id=user_id,
-            text=get_text(lang, "trigger").format(name=name),
+            text=get_text(lang, "trigger"),
             reply_markup=keyboards.trigger_kb(lang),
             parse_mode="HTML"
         )
 
-        # --- КАСАНИЕ 2 (Через 30 минут) — Социальное доказательство ---
+        # --- КАСАНИЕ 2 (через 30 минут) --- Социальное доказательство
         await asyncio.sleep(1800)
-        
         user = await db.db_get_user(user_id)
         if not user or user.get("is_paid"):
             return
@@ -61,9 +61,8 @@ async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
             parse_mode="HTML"
         )
 
-        # --- КАСАНИЕ 3 (Через 4 часа) — Динамический ИИ-дожим ---
+        # --- КАСАНИЕ 3 (через 4 часа) --- Динамический ИИ-дожим со спец-скидкой
         await asyncio.sleep(14400)
-        
         user = await db.db_get_user(user_id)
         if not user or user.get("is_paid"):
             return
@@ -71,18 +70,17 @@ async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
         prompt = (
             "Пользователь зашел в бота, просмотрел тарифы закрытого канала, но так и не купил подписку. "
             "Напиши ему 1 короткую интригующую фразу от своего лица, напомнив, "
-            "что персональное приглашение скоро сгорит."
+            "что персональное приглашение и скидка скоро сгорят."
         )
         ai_push_text = await generate_ai_push(user_message=prompt, lang=lang)
 
-        # Фоллбек на статический текст из texts.py, если API недоступно
         if not ai_push_text:
             ai_push_text = get_text(lang, "push")
 
         await bot.send_message(
             chat_id=user_id,
             text=ai_push_text,
-            reply_markup=keyboards.trigger_kb(lang),
+            reply_markup=keyboards.trigger_kb(lang, include_discount=True),
             parse_mode="HTML"
         )
 
@@ -96,6 +94,32 @@ async def run_delayed_trigger(bot: Bot, user_id: int, name: str, lang: str):
         active_funnels.pop(user_id, None)
 
 
+async def run_abandoned_cart_trigger(bot: Bot, user_id: int, lang: str):
+    """
+    Триггер брошенной корзины: запускается при клике на тариф и отработке инвойса.
+    """
+    try:
+        await asyncio.sleep(600)  # 10 минут ожидания оплаты
+        user = await db.db_get_user(user_id)
+        if not user or user.get("is_paid"):
+            return
+
+        await bot.send_message(
+            chat_id=user_id,
+            text=get_text(lang, "abandoned_cart"),
+            reply_markup=keyboards.trigger_kb(lang, include_discount=True),
+            parse_mode="HTML"
+        )
+    except asyncio.CancelledError:
+        pass
+    except TelegramForbiddenError:
+        pass
+    except Exception as e:
+        logging.error(f"Error in cart funnel for {user_id}: {e}")
+    finally:
+        cart_funnels.pop(user_id, None)
+
+
 @router.message(CommandStart())
 async def cmd_start(m: Message, command: CommandObject):
     user_id = m.from_user.id
@@ -107,9 +131,12 @@ async def cmd_start(m: Message, command: CommandObject):
     asyncio.create_task(db.db_upsert_user(user_id, username, name, lang, ref))
     pub_url = config.PUBLIC_CHANNELS.get(lang, config.PUBLIC_CHANNELS["en"])
 
+    # A/B Тестирование приветственного сообщения
+    welcome_key = random.choice(["welcome_a", "welcome_b"])
+
     try:
         await m.answer(
-            text=get_text(lang, "welcome").format(name=name),
+            text=get_text(lang, welcome_key).format(name=name),
             reply_markup=keyboards.welcome_kb(lang, pub_url),
             parse_mode="HTML"
         )
@@ -119,7 +146,6 @@ async def cmd_start(m: Message, command: CommandObject):
 
 @router.callback_query(F.data.startswith("chk_"))
 async def process_check_subscription(c: CallbackQuery, bot: Bot):
-    """Нажатие на кнопку проверки подписки"""
     lang = c.data.split("_")[-1]
     user_id = c.from_user.id
     name = c.from_user.first_name
@@ -138,7 +164,6 @@ async def process_check_subscription(c: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data == "lng_change")
 async def process_language_change(c: CallbackQuery):
-    """Смена языка интерфейса"""
     try:
         await c.message.edit_text("Select language / Выберите язык:", reply_markup=keyboards.languages_kb())
         await c.answer()
@@ -148,7 +173,6 @@ async def process_language_change(c: CallbackQuery):
 
 @router.callback_query(F.data.startswith("lng_set_"))
 async def process_language_save(c: CallbackQuery):
-    """Сохранение выбранного языка"""
     lang = c.data.split("_")[-1]
     name = c.from_user.first_name
     pub_url = config.PUBLIC_CHANNELS.get(lang, config.PUBLIC_CHANNELS["en"])
@@ -163,7 +187,7 @@ async def process_language_save(c: CallbackQuery):
 
     try:
         await c.message.edit_text(
-            text=get_text(lang, "welcome").format(name=name), 
+            text=get_text(lang, "welcome_a").format(name=name), 
             reply_markup=keyboards.welcome_kb(lang, pub_url),
             parse_mode="HTML"
         )
@@ -174,12 +198,16 @@ async def process_language_save(c: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pay_"))
 async def process_payment_generation(c: CallbackQuery, bot: Bot):
-    """Генерация счета на оплату через Telegram Stars"""
     user_id = c.from_user.id
     _, tier, lang = c.data.split("_")
     
     price = get_tariff_price(lang, tier)
     tier_label = get_text(lang, f"tier_{tier}")
+
+    # Запуск триггера брошенной корзины
+    if user_id in cart_funnels:
+        cart_funnels[user_id].cancel()
+    cart_funnels[user_id] = asyncio.create_task(run_abandoned_cart_trigger(bot, user_id, lang))
 
     if config.ADMIN_ID and user_id != config.ADMIN_ID:
         try:
@@ -212,13 +240,11 @@ async def process_payment_generation(c: CallbackQuery, bot: Bot):
 
 @router.pre_checkout_query()
 async def process_pre_checkout(q: PreCheckoutQuery):
-    """Подтверждение платежа"""
     await q.answer(ok=True)
 
 
 @router.message(F.successful_payment)
 async def process_successful_payment(m: Message, bot: Bot):
-    """Обработка успешного платежа"""
     user_id = m.from_user.id
     payload = m.successful_payment.invoice_payload
     
@@ -230,9 +256,14 @@ async def process_successful_payment(m: Message, bot: Bot):
         tier = "lifetime"
         lang = "en"
 
+    # Отменяем все активные автодожимы для оплатившего юзера
     if user_id in active_funnels:
         active_funnels[user_id].cancel()
         active_funnels.pop(user_id, None)
+
+    if user_id in cart_funnels:
+        cart_funnels[user_id].cancel()
+        cart_funnels.pop(user_id, None)
 
     asyncio.create_task(db.db_set_paid_status(user_id, True))
 
@@ -267,7 +298,7 @@ async def cmd_stats(m: Message):
         f"👥 Всего пользователей: <b>{st['total']}</b>\n"
         f"💰 Оплат приватного канала: <b>{st['paid']}</b>\n"
         f"📉 Общая конверсия: <b>{round((st['paid']/max(st['total'],1))*100, 1)}%</b>\n\n"
-        f"🔗 <b>Переходы по источникам (TikTok):</b>\n{ref_text}"
+        f"🔗 <b>Переходы по источникам:</b>\n{ref_text}"
     )
     await m.answer(text, parse_mode="HTML")
 
@@ -381,16 +412,13 @@ async def cmd_cleanup(m: Message, bot: Bot):
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_user_text(m: Message, bot: Bot):
-    """
-    Обработка входящих сообщений: ИИ отвечает пользователю в реальном времени + копирует диалог в админку.
-    """
     if m.from_user.id == config.ADMIN_ID:
         return
 
     user_id = m.from_user.id
     lang = get_user_lang(m.from_user.language_code)
 
-    # 1. Пересылаем вопрос админу для тикет-системы
+    # 1. Тикет в админку
     try:
         await bot.send_message(
             chat_id=config.ADMIN_ID,
@@ -402,16 +430,15 @@ async def handle_user_text(m: Message, bot: Bot):
     except Exception as e:
         logging.error(f"Не удалось отправить тикет админу: {e}")
 
-    # 2. Показываем индикатор набора текста
+    # 2. Typing indicator
     try:
         await bot.send_chat_action(chat_id=user_id, action="typing")
     except Exception:
         pass
 
-    # 3. Генерируем ответ через ИИ
+    # 3. ИИ-ответ
     ai_reply = await generate_ai_push(user_message=m.text, lang=lang)
 
-    # 4. Отправляем ответ ИИ с кнопками выбора тарифа
     try:
         if ai_reply:
             await m.answer(text=ai_reply, reply_markup=keyboards.trigger_kb(lang))
@@ -423,7 +450,6 @@ async def handle_user_text(m: Message, bot: Bot):
 
 @router.message(F.reply_to_message & (F.chat.id == config.ADMIN_ID))
 async def reply_from_admin(m: Message, bot: Bot):
-    """Ответ админа из группы/чата отправляется обратно пользователю"""
     reply_text = m.reply_to_message.text or ""
     if "TICKET_ID:" not in reply_text:
         return
