@@ -13,6 +13,10 @@ PORT = int(os.getenv("PORT", "8080"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+# Настройки OpenRouter API
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "openai/gpt-4o-mini")
+
 if not all([BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY]):
     raise RuntimeError("Критические переменные окружения не заданы!")
 
