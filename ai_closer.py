@@ -1,7 +1,6 @@
-# ai_closer.py
 import logging
 import aiohttp
-from config import OPENROUTER_API_KEY, AI_MODEL  # или из os.getenv
+from config import OPENROUTER_API_KEY, AI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -27,35 +26,32 @@ SYSTEM_PROMPT_TEMPLATE = """Ты — девушка, создательница 
 
 async def generate_ai_push(user_message: str, lang: str = "ru", history: list = None) -> str:
     """
-    Генерация ответа ИИ с экономией токенов и ролевым дожимом.
+    Генерирует короткий ответ/дожим через OpenRouter API.
     """
     if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY не установлен.")
+        logger.error("OPENROUTER_API_KEY не установлен в config.py.")
         return ""
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(lang=lang)
 
-    # Формируем цепочку сообщений (только последние 4 для экономии токенов)
     messages = [{"role": "system", "content": system_prompt}]
     
     if history:
-        # Берём максимум последние 4 сообщения истории
         for msg in history[-4:]:
-            messages.append({"role": msg["role"], "content": msg["content"]})
+            messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
     messages.append({"role": "user", "content": user_message})
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://telegram.org",
     }
 
     payload = {
-        "model": AI_MODEL or "openai/gpt-4o-mini",  # gpt-4o-mini / deepseek-r1 / claude-3-haiku — дешёвые и быстрые
+        "model": AI_MODEL or "openai/gpt-4o-mini",
         "messages": messages,
-        "max_tokens": 120,      # Экономия токенов
-        "temperature": 0.7,     # Живой разговорный стиль
+        "max_tokens": 120,
+        "temperature": 0.7,
     }
 
     try:
@@ -64,14 +60,13 @@ async def generate_ai_push(user_message: str, lang: str = "ru", history: list = 
                 "https://openrouter.ai/api/v1/chat/completions",
                 json=payload,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=8)
+                timeout=aiohttp.ClientTimeout(total=7)
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    answer = data["choices"][0]["message"]["content"].strip()
-                    return answer
+                    return data["choices"][0]["message"]["content"].strip()
                 else:
-                    logger.error(f"OpenRouter API error {resp.status}: await resp.text()")
+                    logger.error(f"OpenRouter API returned status {resp.status}")
                     return ""
     except Exception as e:
         logger.error(f"Ошибка при вызове AI Closer: {e}")
