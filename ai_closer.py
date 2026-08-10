@@ -1,6 +1,6 @@
 import logging
 import aiohttp
-from config import OPENROUTER_API_KEY, AI_MODEL
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -24,33 +24,30 @@ SYSTEM_PROMPT_TEMPLATE = """Ты — девушка, создательница 
 - "Подумаю": "Думай, но ссылка динамическая и скоро сгорит. Не упусти шанс увидеть меня настоящую 🤍"
 """
 
-async def generate_ai_push(user_message: str, lang: str = "ru", history: list = None) -> str:
+async def generate_ai_push(user_message: str, lang: str = "en") -> str:
     """
-    Генерирует короткий ответ/дожим через OpenRouter API.
+    Генерация ответа ИИ через OpenRouter API.
     """
-    if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY не установлен в config.py.")
+    api_key = getattr(config, "OPENROUTER_API_KEY", None)
+    if not api_key:
+        logger.error("OPENROUTER_API_KEY не задан в config.py")
         return ""
 
+    model = getattr(config, "AI_MODEL", "openai/gpt-4o-mini")
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(lang=lang)
 
-    messages = [{"role": "system", "content": system_prompt}]
-    
-    if history:
-        for msg in history[-4:]:
-            messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
-
-    messages.append({"role": "user", "content": user_message})
-
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
     payload = {
-        "model": AI_MODEL or "openai/gpt-4o-mini",
-        "messages": messages,
-        "max_tokens": 120,
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        "max_tokens": 100,
         "temperature": 0.7,
     }
 
@@ -65,9 +62,8 @@ async def generate_ai_push(user_message: str, lang: str = "ru", history: list = 
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"].strip()
-                else:
-                    logger.error(f"OpenRouter API returned status {resp.status}")
-                    return ""
+                logger.error(f"OpenRouter status: {resp.status}")
+                return ""
     except Exception as e:
-        logger.error(f"Ошибка при вызове AI Closer: {e}")
+        logger.error(f"Ошибка AI Closer: {e}")
         return ""
