@@ -15,25 +15,81 @@ def main_kb(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def premium_kb(lang: str, market: str, show_manage: bool = False) -> InlineKeyboardMarkup:
+def premium_kb(
+    lang: str,
+    market: str,
+    show_manage: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"Plus · {price(market, 'plus')} ⭐", callback_data="pay:plus")],
-        [InlineKeyboardButton(text=f"⭐ Pro · {price(market, 'pro')} ⭐", callback_data="pay:pro")],
-        [InlineKeyboardButton(text=f"✨ Ultra · {price(market, 'ultra')} ⭐", callback_data="pay:ultra")],
-        [InlineKeyboardButton(text=f"♠ Black · {price(market, 'black')} ⭐", callback_data="pay:black")],
+        [
+            InlineKeyboardButton(
+                text=f"⚡ {product_title(lang, 'plus')} · {price(market, 'plus')} ⭐",
+                callback_data="pay:plus",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"🔥 {product_title(lang, 'pro')} · {price(market, 'pro')} ⭐",
+                callback_data="pay:pro",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"🚀 {product_title(lang, 'ultra')} · {price(market, 'ultra')} ⭐",
+                callback_data="pay:ultra",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"💎 {product_title(lang, 'black')} · {price(market, 'black')} ⭐",
+                callback_data="pay:black",
+            )
+        ],
     ]
+
     if show_manage:
-        rows.append([InlineKeyboardButton(text="Manage subscription", callback_data="subscription:manage")])
-    rows.append([InlineKeyboardButton(text=f"← {t(lang, 'menu')}", callback_data="nav:menu")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Manage subscription",
+                    callback_data="subscription:manage",
+                )
+            ]
+        )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=f"← {t(lang, 'menu')}",
+                callback_data="nav:menu",
+            )
+        ]
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def checkout_kb(url: str, product_code: str, lang: str) -> InlineKeyboardMarkup:
-    product = PRODUCTS[product_code]
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Pay for {product.title}", url=url)],
-        [InlineKeyboardButton(text=f"← {t(lang, 'premium')}", callback_data="nav:premium")],
-    ])
+def checkout_kb(
+    url: str,
+    product_code: str,
+    lang: str,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"⭐ {product_title(lang, product_code)}",
+                    url=url,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"← {t(lang, 'premium')}",
+                    callback_data="nav:premium",
+                )
+            ],
+        ]
+    )
 
 
 def subscription_kb(lang: str, recurring: bool) -> InlineKeyboardMarkup:
