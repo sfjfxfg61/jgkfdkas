@@ -285,7 +285,11 @@ async def successful_payment(message: Message, bot: Bot) -> None:
         {"product": product.code, "market": market, "amount": expected_amount, "recurring": product.recurring},
     )
     until = str(result.get("premium_until", ""))[:10]
-    text = f"<b>{product.title} activated.</b>\nAccess is active until {until}."
+    display_title = product_title(lang, product.code)
+    text = (
+        f"<b>{html.escape(display_title)} activated.</b>\n"
+        f"Access is active until {until}."
+    )
     if settings.private_channel_url:
         text += f"\n\nPrivate community: {html.escape(settings.private_channel_url)}"
     await message.answer(text, reply_markup=keyboards.main_kb(lang))
