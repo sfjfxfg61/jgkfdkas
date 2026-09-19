@@ -489,23 +489,43 @@ async def chat(message: Message, bot: Bot) -> None:
     user_id = message.from_user.id
     if user_id == settings.admin_id:
         return
+
     async with _lock(user_id):
         user = await store.get_user(user_id)
-        lang = (user or {}).get("lang") or normalize_lang(message.from_user.language_code)
+        lang = (user or {}).get("lang") or normalize_lang(
+            message.from_user.language_code
+        )
+
         if not user or not user.get("onboarding_complete"):
             return await message.answer(t(lang, "not_ready"))
+
         user_text = compact_text(message.text or "", 4000)
         if not user_text:
             return
+
         try:
             reminder_stage = int(user.get("reminder_stage") or 0)
             takeover_active = _takeover_active(user)
-            if takeover_active or _is_hot_lead(user_text):
-                await _notify_admin(message, bot, user, user_text)
-                if not takeover_active:
-                    await store.track_event(user_id, "hot_lead", {"tier": _tier(user), "lang": lang})
-            history = await store.recent_messages(user_id, entitlements(_tier(user)).history_messages)
+
+            # Каждое сообщение пользователя отправляется админу
+            await _notify_admin(message, bot, user, user_text)
+
+            if _is_hot_lead(user_text):
+                await store.track_event(
+                    user_id,
+                    "hot_lead",
+                    {
+                        "tier": _tier(user),
+                        "lang": lang,
+                    },
+                )
+
+            history = await store.recent_messages(
+                user_id,
+                entitlements(_tier(user)).history_messages,
+            )
             await store.add_message(user_id, "user", user_text)
+
             if takeover_active:
                 await store.update_user(
                     user_id,
@@ -513,32 +533,69 @@ async def chat(message: Message, bot: Bot) -> None:
                     last_reminder_at=None,
                     reminder_stage=0,
                 )
+
                 if reminder_stage:
                     await store.track_event(
                         user_id,
                         "reminder_returned",
-                        {"stage": f"d{(1, 3, 7)[reminder_stage - 1]}"},
+                        {
+                            "stage": f"d{(1, 3, 7)[reminder_stage - 1]}",
+                        },
                     )
-                await store.track_event(user_id, "message_during_human_takeover")
+
+                await store.track_event(
+                    user_id,
+                    "message_during_human_takeover",
+                )
                 return
+
             tier = _tier(user)
             limits = entitlements(tier)
-            quota = await store.consume_quota(user_id, limits.daily_messages)
+
+            quota = await store.consume_quota(
+                user_id,
+                limits.daily_messages,
+            )
+
             if reminder_stage:
                 await store.track_event(
                     user_id,
                     "reminder_returned",
-                    {"stage": f"d{(1, 3, 7)[reminder_stage - 1]}"},
+                    {
+                        "stage": f"d{(1, 3, 7)[reminder_stage - 1]}",
+                    },
                 )
+
             if not quota.get("allowed"):
-                await store.track_event(user_id, "quota_paywall", {"tier": tier})
-                return await message.answer(
-                    f"Daily {tier.title()} limit reached. Choose a higher plan for more messages.",
-                    reply_markup=keyboards.premium_kb(lang, default_market(lang), bool(user.get("subscription_recurring"))),
+                await store.track_event(
+                    user_id,
+                    "quota_paywall",
+                    {"tier": tier},
                 )
-            memories = await store.memories(user_id, limits.memories)
-            level, _ = relationship_level(int(quota.get("xp", user.get("xp", 0))))
+
+                return await message.answer(
+                    (
+                        f"Daily {tier.title()} limit reached. "
+                        "Choose a higher plan for more messages."
+                    ),
+                    reply_markup=keyboards.premium_kb(
+                        lang,
+                        default_market(lang),
+                        bool(user.get("subscription_recurring")),
+                    ),
+                )
+
+            memories = await store.memories(
+                user_id,
+                limits.memories,
+            )
+
+            level, _ = relationship_level(
+                int(quota.get("xp", user.get("xp", 0)))
+            )
+
             await bot.send_chat_action(user_id, "typing")
+
             reply = await companion_ai.reply(
                 lang=lang,
                 style=user.get("style", "warm"),
@@ -548,29 +605,64 @@ async def chat(message: Message, bot: Bot) -> None:
                 user_text=user_text,
                 model=limits.model,
             )
+
             if not reply:
                 return await message.answer(t(lang, "ai_error"))
+
             total = int(quota.get("total_messages", 0))
             rendered_reply = html.escape(reply)
             nudge_event = ""
+
             if tier == "free" and total in {4, 12, 30}:
                 rendered_reply += f"\n\n{t(lang, 'premium_nudge')}"
                 nudge_event = "premium_nudge_shown"
+
             elif settings.public_channel(lang) and total in {7, 20, 50}:
                 rendered_reply += f"\n\n{t(lang, 'channel_nudge')}"
                 nudge_event = "channel_nudge_shown"
-            await store.add_message(user_id, "assistant", reply)
-            await message.answer(rendered_reply, reply_markup=keyboards.main_kb(lang))
+
+            await store.add_message(
+                user_id,
+                "assistant",
+                reply,
+            )
+
+            await message.answer(
+                rendered_reply,
+                reply_markup=keyboards.main_kb(lang),
+            )
+
             if nudge_event:
-                await store.track_event(user_id, nudge_event, {"message_count": total})
+                await store.track_event(
+                    user_id,
+                    nudge_event,
+                    {"message_count": total},
+                )
+
             if total in {1, 3, 10, 25, 50, 100}:
-                await store.track_event(user_id, "message_milestone", {"count": total, "tier": tier})
+                await store.track_event(
+                    user_id,
+                    "message_milestone",
+                    {
+                        "count": total,
+                        "tier": tier,
+                    },
+                )
+
             if total and total % settings.memory_extraction_interval == 0:
                 items = await companion_ai.extract_memories(user_text)
                 await store.upsert_memories(user_id, items)
+
         except DatabaseError:
-            logger.exception("Database error while chatting with user %s", user_id)
+            logger.exception(
+                "Database error while chatting with user %s",
+                user_id,
+            )
             await message.answer(t(lang, "ai_error"))
+
         except Exception:
-            logger.exception("Chat generation failed for user %s", user_id)
+            logger.exception(
+                "Chat generation failed for user %s",
+                user_id,
+            )
             await message.answer(t(lang, "ai_error"))
