@@ -23,6 +23,7 @@ from monetization import (
     parse_payload,
     paywall_text,
     price,
+    product_title,
 )
 from texts import t
 
