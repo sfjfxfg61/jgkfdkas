@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import settings
-from monetization import PRODUCTS, price
+from monetization import price, product_title
 from texts import t
 
 
