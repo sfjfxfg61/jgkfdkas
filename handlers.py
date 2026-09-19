@@ -179,36 +179,59 @@ async def create_checkout(callback: CallbackQuery, bot: Bot) -> None:
     product_code = callback.data.split(":", 1)[1]
     if product_code not in PRODUCTS:
         return await callback.answer("Unknown plan", show_alert=True)
+
     user, lang = await _user(callback)
     if not user:
         return await callback.answer("/start", show_alert=True)
+
     market = default_market(lang)
     product = PRODUCTS[product_code]
+    display_title = product_title(lang, product_code)
     amount = price(market, product_code)
     payload = make_payload(callback.from_user.id, product_code, market)
+
     kwargs = {
-        "title": f"Vika {product.title}"[:32],
+        "title": f"Vika {display_title}"[:32],
         "description": (
-            f"{product.title}: {entitlements(product.tier).daily_messages} messages/day, "
-            "expanded memory and premium response quality."
+            f"{display_title}: "
+            f"{entitlements(product.tier).daily_messages} messages per day."
         )[:255],
         "payload": payload,
         "provider_token": "",
         "currency": "XTR",
-        "prices": [LabeledPrice(label=product.title, amount=amount)],
+        "prices": [
+            LabeledPrice(
+                label=display_title,
+                amount=amount,
+            )
+        ],
     }
+
     if product.recurring:
         kwargs["subscription_period"] = SUBSCRIPTION_PERIOD
+
     invoice_url = await bot.create_invoice_link(**kwargs)
+
     await store.track_event(
         callback.from_user.id,
         "checkout_created",
-        {"product": product_code, "market": market, "amount": amount},
+        {
+            "product": product_code,
+            "market": market,
+            "amount": amount,
+        },
     )
+
     await callback.answer()
+
     await callback.message.answer(
-        f"<b>{product.title}</b> · {amount} ⭐" + (" every 30 days" if product.recurring else " one payment"),
-        reply_markup=keyboards.checkout_kb(invoice_url, product_code, lang),
+        f"<b>{html.escape(display_title)}</b> · {amount} ⭐"
+        + (" every 30 days" if product.recurring else " one payment"),
+        reply_markup=keyboards.checkout_kb(
+            invoice_url,
+            product_code,
+            lang,
+        ),
     )
 
 
