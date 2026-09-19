@@ -8,7 +8,6 @@ from texts import t
 def main_kb(lang: str) -> InlineKeyboardMarkup:
     rows = [[
         InlineKeyboardButton(text=f"✨ {t(lang, 'premium')}", callback_data="nav:premium"),
-        InlineKeyboardButton(text=f"ℹ️ {t(lang, 'about_button')}", callback_data="nav:about"),
     ]]
     public_channel_url = settings.public_channel(lang)
     if public_channel_url:
