@@ -46,12 +46,12 @@ ENTITLEMENTS: dict[str, Entitlements] = {
 
 # Prices are in Telegram Stars. Keep every recurring price <= 10,000 Stars.
 PRICE_MATRIX: dict[str, dict[str, int]] = {
-    "ua": {"plus": 249, "pro": 549, "ultra": 1_299, "black": 4_999},
-    "cis": {"plus": 299, "pro": 699, "ultra": 1_499, "black": 5_499},
-    "latam": {"plus": 349, "pro": 799, "ultra": 1_799, "black": 5_999},
-    "eu": {"plus": 599, "pro": 1_399, "ultra": 3_299, "black": 8_499},
-    "us": {"plus": 899, "pro": 2_199, "ultra": 4_999, "black": 9_999},
-    "global": {"plus": 499, "pro": 1_099, "ultra": 2_499, "black": 6_999},
+    "ua": {"plus": 249, "приватні)": 549, "ultra": 1_299, "приватні+дзвінки": 4_999},
+    "cis": {"plus": 299, "приватные)": 699, "ultra": 1_499, "приватные+звонки": 5_499},
+    "latam": {"plus": 349, "chat privado": 799, "ultra": 1_799, "privados + llamadas": 5_999},
+    "eu": {"plus": 599, "private chat": 1_399, "ultra": 3_299, "private + calls": 8_499},
+    "us": {"plus": 899, "private chat": 2_199, "ultra": 4_999, "private + calls": 9_999},
+    "global": {"plus": 499, "private chat": 1_099, "ultra": 2_499, "private + calls": 6_999},
 }
 
 MARKET_NAMES = {
@@ -118,16 +118,8 @@ def paywall_text(lang: str, market: str) -> str:
         return (
             "<b>Выберите подходящий тариф</b>\n\n"
             f"⚡ <b>Plus · {prices['plus']} ⭐/мес</b>\n"
-            "• 100 сообщений в день\n"
-            "• Память на 30 фактов о вас\n\n"
             f"🔥 <b>Pro · {prices['pro']} ⭐/мес — Выбор большинство</b>\n"
-            "• 300 сообщений в день\n"
-            "• Улучшенная и более умная модель\n"
-            "• Расширенная память (100 фактов)\n\n"
             f"🚀 <b>Ultra · {prices['ultra']} ⭐/мес</b>\n"
-            "• 800 сообщений в день\n"
-            "• Флагманская AI-модель\n"
-            "• Глубокая память (250 фактов)\n\n"
             f"💎 <b>Black · {prices['black']} ⭐ / год (Максимальная выгода)</b>\n"
             "• Полный доступ Ultra на 365 дней одним платежом."
         )
@@ -136,16 +128,8 @@ def paywall_text(lang: str, market: str) -> str:
         return (
             "<b>Оберіть відповідний тариф</b>\n\n"
             f"⚡ <b>Plus · {prices['plus']} ⭐/міс</b>\n"
-            "• 100 повідомлень на день\n"
-            "• Пам'ять на 30 фактів про вас\n\n"
             f"🔥 <b>Pro · {prices['pro']} ⭐/міс — Вибір більшості</b>\n"
-            "• 300 повідомлень на день\n"
-            "• Розумніша та швидша модель\n"
-            "• Розширена пам'ять (100 фактів)\n\n"
             f"🚀 <b>Ultra · {prices['ultra']} ⭐/міс</b>\n"
-            "• 800 повідомлень на день\n"
-            "• Флагманська AI-модель\n"
-            "• Глибока пам'ять (250 фактів)\n\n"
             f"💎 <b>Black · {prices['black']} ⭐ / рік (Максимальна вигода)</b>\n"
             "• Повний доступ Ultra на 365 днів одним платежем."
         )
@@ -154,16 +138,8 @@ def paywall_text(lang: str, market: str) -> str:
         return (
             "<b>Elige tu plan Premium</b>\n\n"
             f"⚡ <b>Plus · {prices['plus']} ⭐/mes</b>\n"
-            "• 100 mensajes al día\n"
-            "• Memoria de 30 recuerdos\n\n"
             f"🔥 <b>Pro · {prices['pro']} ⭐/mes — Más popular</b>\n"
-            "• 300 mensajes al día\n"
-            "• Modelo IA más inteligente\n"
-            "• Memoria ampliada (100 recuerdos)\n\n"
             f"🚀 <b>Ultra · {prices['ultra']} ⭐/mes</b>\n"
-            "• 800 mensajes al día\n"
-            "• El mejor modelo IA disponible\n"
-            "• Memoria profunda (250 recuerdos)\n\n"
             f"💎 <b>Black · {prices['black']} ⭐ / año (Mejor valor)</b>\n"
             "• Acceso Ultra completo durante 365 días en un solo pago."
         )
@@ -172,16 +148,9 @@ def paywall_text(lang: str, market: str) -> str:
         return (
             "<b>Wähle deinen Premium-Tarif</b>\n\n"
             f"⚡ <b>Plus · {prices['plus']} ⭐/Monat</b>\n"
-            "• 100 Nachrichten täglich\n"
-            "• 30 Erinnerungen im Speicher\n\n"
             f"🔥 <b>Pro · {prices['pro']} ⭐/Monat — Beliebt</b>\n"
-            "• 300 Nachrichten täglich\n"
-            "• Intelligenteres KI-Modell\n"
             "• Erweiterter Speicher (100 Erinnerungen)\n\n"
             f"🚀 <b>Ultra · {prices['ultra']} ⭐/Monat</b>\n"
-            "• 800 Nachrichten täglich\n"
-            "• Leistungsstärkstes KI-Modell\n"
-            "• Tiefer Speicher (250 Erinnerungen)\n\n"
             f"💎 <b>Black · {prices['black']} ⭐ / Jahr (Bester Deal)</b>\n"
             "• Voller Ultra-Zugriff für 365 Tage mit einer Zahlung."
         )
@@ -190,16 +159,8 @@ def paywall_text(lang: str, market: str) -> str:
         return (
             "<b>Choisis ton forfait Premium</b>\n\n"
             f"⚡ <b>Plus · {prices['plus']} ⭐/mois</b>\n"
-            "• 100 messages par jour\n"
-            "• Mémorisation de 30 souvenirs\n\n"
             f"🔥 <b>Pro · {prices['pro']} ⭐/mois — Plus populaire</b>\n"
-            "• 300 messages par jour\n"
-            "• Modèle IA plus intelligent\n"
-            "• Mémoire étendue (100 souvenirs)\n\n"
             f"🚀 <b>Ultra · {prices['ultra']} ⭐/mois</b>\n"
-            "• 800 messages par jour\n"
-            "• Modèle IA le plus puissant\n"
-            "• Mémoire profonde (250 souvenirs)\n\n"
             f"💎 <b>Black · {prices['black']} ⭐ / an (Meilleure offre)</b>\n"
             "• Accès Ultra complet pendant 365 jours en un seul paiement."
         )
@@ -207,16 +168,8 @@ def paywall_text(lang: str, market: str) -> str:
     return (
         "<b>Choose Your Plan</b>\n\n"
         f"⚡ <b>Plus · {prices['plus']} ⭐/month</b>\n"
-        "• 100 messages per day\n"
-        "• 30 long-term memories\n\n"
         f"🔥 <b>Pro · {prices['pro']} ⭐/month — Most Popular</b>\n"
-        "• 300 messages per day\n"
-        "• Smarter AI model\n"
-        "• Extended memory (100 facts)\n\n"
         f"🚀 <b>Ultra · {prices['ultra']} ⭐/month</b>\n"
-        "• 800 messages per day\n"
-        "• Flagship AI model\n"
-        "• Deep memory (250 facts)\n\n"
         f"💎 <b>Black · {prices['black']} ⭐ / year (Best Value)</b>\n"
         "• Full Ultra access for 365 days in a single payment."
     )
