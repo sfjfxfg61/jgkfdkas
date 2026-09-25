@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ai_companion import companion_ai
 from config import settings
@@ -46,6 +47,14 @@ def reminder_stage_for_inactivity(inactive_for: timedelta) -> int:
     return 0
 
 
+def next_reminder_stage(inactive_for: timedelta, sent_stage: int, since_last: timedelta | None) -> int:
+    # A message never goes out more often than once every 48 hours.
+    if since_last is not None and since_last < timedelta(hours=48):
+        return 0
+    next_stage = sent_stage + 1
+    return next_stage if next_stage <= 3 and reminder_stage_for_inactivity(inactive_for) >= next_stage else 0
+
+
 async def reminder_loop(bot: Bot) -> None:
     await asyncio.sleep(30)
     while True:
@@ -53,17 +62,28 @@ async def reminder_loop(bot: Bot) -> None:
             now = datetime.now(timezone.utc)
             users = await store.eligible_for_reminders()
             for user in users:
+                if user["user_id"] == settings.admin_id:
+                    continue
                 last_active = _parse_time(user.get("last_active_at"))
                 if not last_active:
                     continue
-                stage = reminder_stage_for_inactivity(now - last_active)
-                if stage <= int(user.get("reminder_stage") or 0):
+                last_sent = _parse_time(user.get("last_reminder_at"))
+                stage = next_reminder_stage(now - last_active, int(user.get("reminder_stage") or 0),
+                                            now - last_sent if last_sent else None)
+                if not stage or stage == 3 and not await store.reminder_was_engaged(user["user_id"], user["last_active_at"]):
                     continue
                 try:
                     stage_name = f"d{(1, 3, 7)[stage - 1]}"
-                    await bot.send_message(user["user_id"], t(user.get("lang", "en"), f"reminder_{stage_name}"))
+                    lang = user.get("lang", "en")
+                    segment = "new" if not int(user.get("total_messages") or 0) else "chat"
+                    await bot.send_message(
+                        user["user_id"], t(lang, f"reminder_{segment}_{stage_name}"),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text=t(lang, "reminder_cta"), callback_data=f"reminder:reply:{stage_name}:{segment}")
+                        ]]),
+                    )
                     await store.mark_reminder_sent(user["user_id"], stage)
-                    await store.track_event(user["user_id"], "reminder_sent", {"stage": stage_name})
+                    await store.track_event(user["user_id"], "reminder_sent", {"stage": stage_name, "segment": segment})
                     await asyncio.sleep(0.08)
                 except TelegramForbiddenError:
                     await store.mark_blocked(user["user_id"])
@@ -74,7 +94,7 @@ async def reminder_loop(bot: Bot) -> None:
         except DatabaseError as exc:
             logger.error(
                 "Reminders skipped because Supabase rejected the query. "
-                "Run the complete schema.sql migration. Details: %s",
+                "Run the required incremental migrations. Details: %s",
                 exc,
             )
         except Exception:
@@ -138,6 +158,8 @@ async def delayed_reply_loop(bot: Bot) -> None:
                         sent = True
                         await store.add_message(user_id, "assistant", reply)
                         await store.track_event(user_id, "delayed_reply_sent")
+                except TelegramForbiddenError:
+                    await store.mark_blocked(user_id)
                 except Exception:
                     logger.exception("Delayed reply failed for %s", user_id)
                     if not sent:
