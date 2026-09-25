@@ -41,6 +41,83 @@ async def channel_id_command(message: Message, bot: Bot) -> None:
         await bot.send_message(settings.admin_id, f"Channel ID: <code>{message.chat.id}</code> — use this number as PRIVATE_CHANNEL_URL")
 
 
+@router.message(Command("admin"), F.from_user.id == settings.admin_id)
+async def admin_help(message: Message) -> None:
+    await message.answer(
+        "<b>Админ-команды</b>\n"
+        "/stats — продукт и аудитория; /reminders_stats — напоминания; /user ID — карточка\n"
+        "/setregion MARKET или /setregion ID MARKET — смена региона\n"
+        "/setlang LANG или /setlang ID LANG — смена языка\n"
+        "/queue, /calls, /send ID TEXT, /broadcast TEXT, /pause ID, /ai ID"
+    )
+
+
+@router.message(Command("setregion"), F.from_user.id == settings.admin_id)
+async def admin_set_region(message: Message, command: CommandObject) -> None:
+    parts = (command.args or "").lower().split()
+    if len(parts) == 1:
+        target, market = message.from_user.id, parts[0]
+    elif len(parts) == 2 and parts[0].isdigit():
+        target, market = int(parts[0]), parts[1]
+    else:
+        return await message.answer("Usage: /setregion [USER_ID] ua|cis|latam|eu|us|global")
+    if market not in MARKETS:
+        return await message.answer("Unknown market: ua, cis, latam, eu, us, global")
+    user = await store.get_user(target)
+    if not user:
+        return await message.answer("User not found. Send /start from that account first.")
+    await store.update_user(target, market=market, region_confirmed=True, onboarding_complete=True)
+    await store.track_event(target, "admin_region_changed", {"market": market})
+    await message.answer(f"Region for <code>{target}</code>: <b>{market}</b>")
+
+
+@router.message(Command("setlang"), F.from_user.id == settings.admin_id)
+async def admin_set_language(message: Message, command: CommandObject) -> None:
+    parts = (command.args or "").lower().split()
+    if len(parts) == 1:
+        target, lang = message.from_user.id, parts[0]
+    elif len(parts) == 2 and parts[0].isdigit():
+        target, lang = int(parts[0]), parts[1]
+    else:
+        return await message.answer("Usage: /setlang [USER_ID] uk|ru|en|es|de|fr")
+    if lang not in {"uk", "ru", "en", "es", "de", "fr"}:
+        return await message.answer("Unknown language: uk, ru, en, es, de, fr")
+    if not await store.get_user(target):
+        return await message.answer("User not found.")
+    await store.update_user(target, lang=lang)
+    await store.track_event(target, "admin_language_changed", {"lang": lang})
+    await message.answer(f"Language for <code>{target}</code>: <b>{lang}</b>")
+
+
+@router.message(Command("user"), F.from_user.id == settings.admin_id)
+async def admin_user_card(message: Message, command: CommandObject) -> None:
+    raw = (command.args or "").strip()
+    if not raw.isdigit():
+        return await message.answer("Usage: /user USER_ID")
+    user = await store.get_user(int(raw))
+    if not user:
+        return await message.answer("User not found.")
+    await message.answer(
+        f"ID <code>{raw}</code> · @{html.escape(user.get('username') or '—')}\n"
+        f"Region: {html.escape(user.get('market') or '—')} · Language: {html.escape(user.get('lang') or '—')}\n"
+        f"Plan: {_tier(user)} · Blocked: {'yes' if user.get('blocked') else 'no'}\n"
+        f"Messages: {user.get('total_messages', 0)} · Last active: {str(user.get('last_active_at'))[:16]}"
+    )
+
+
+@router.callback_query(F.data.startswith("reminder:reply:"))
+async def reminder_reply(callback: CallbackQuery) -> None:
+    user, lang = await _user(callback)
+    if not user:
+        return await callback.answer("/start", show_alert=True)
+    _, _, stage, segment = callback.data.split(":")
+    if stage not in {"d1", "d3", "d7"} or segment not in {"new", "chat"}:
+        return await callback.answer()
+    await store.track_event(callback.from_user.id, "reminder_clicked", {"stage": stage, "segment": segment})
+    await callback.answer()
+    await callback.message.answer(t(lang, "menu"))
+
+
 async def _channel_id(bot: Bot) -> int | None:
     if not settings.private_channel_ref:
         return None
@@ -558,11 +635,14 @@ async def admin_stats(message: Message) -> None:
     reminders = stats.get("reminders", {})
     acquisition = stats.get("acquisition", {})
     membership = stats.get("membership", {})
+    health = stats.get("health", {})
     await message.answer(
         "<b>Vika · продукт и воронка</b>\n\n"
-        f"Пользователи: <b>{overview.get('users', 0)}</b> · доступно: <b>{overview.get('reachable', 0)}</b>\n"
+        f"Всего пользователей: <b>{health.get('total', overview.get('users', 0))}</b>\n"
+        f"Не заблокировали бота: <b>{health.get('reachable', overview.get('reachable', 0))}</b> · "
+        f"Заблокировали: <b>{health.get('blocked', 0)}</b>\n"
         f"Новые: 24ч <b>{overview.get('new_1d', 0)}</b> · 7д <b>{overview.get('new_7d', 0)}</b> · 30д <b>{overview.get('new_30d', 0)}</b>\n"
-        f"Активные: 24ч <b>{overview.get('active_1d', 0)}</b> · 7д <b>{overview.get('active_7d', 0)}</b> · 30д <b>{overview.get('active_30d', 0)}</b>\n"
+        f"Активные без блокировки: 24ч <b>{health.get('active_1d', 0)}</b> · 7д <b>{health.get('active_7d', 0)}</b> · 30д <b>{health.get('active_30d', 0)}</b>\n"
         f"Сообщений пользователей: <b>{overview.get('messages', 0)}</b>\n\n"
         "<b>Воронка</b>\n"
         f"Start: <b>{funnel.get('started', 0)}</b>\n"
@@ -595,6 +675,20 @@ async def admin_stats(message: Message) -> None:
         f"Очередь чата: <b>{membership.get('reply_queue', 0)}</b> · автоответов: <b>{membership.get('delayed_replies', 0)}</b>\n"
         f"Звонки: ожидают <b>{membership.get('call_pending', 0)}</b> · проведены <b>{membership.get('call_completed', 0)}</b>"
     )
+
+
+@router.message(Command("reminders_stats"), F.from_user.id == settings.admin_id)
+async def admin_reminders_stats(message: Message) -> None:
+    health = (await store.stats()).get("health", {})
+    lines = ["<b>Напоминания · последние 30 дней</b>"]
+    for row in health.get("reminders_by_segment", []):
+        sent, clicks, returned, blocked = (int(row.get(k) or 0) for k in ("sent", "clicked", "returned", "blocked"))
+        lines.append(
+            f"{html.escape(row.get('segment') or 'other')} · {html.escape(row.get('stage') or '—')}: "
+            f"{sent} отправлено · {clicks} нажали ({clicks / max(sent, 1):.1%}) · "
+            f"{returned} написали за 24 ч ({returned / max(sent, 1):.1%}) · блокировок {blocked}"
+        )
+    await message.answer("\n".join(lines) if len(lines) > 1 else "Напоминаний за 30 дней пока нет.")
 
 
 @router.message(Command("broadcast"), F.from_user.id == settings.admin_id)
@@ -707,8 +801,6 @@ async def admin_ticket_reply(message: Message, bot: Bot) -> None:
 @router.message(F.text & ~F.text.startswith("/"))
 async def chat(message: Message, bot: Bot) -> None:
     user_id = message.from_user.id
-    if user_id == settings.admin_id:
-        return
 
     async with _lock(user_id):
         user = await store.get_user(user_id)
@@ -725,6 +817,7 @@ async def chat(message: Message, bot: Bot) -> None:
 
         try:
             reminder_stage = int(user.get("reminder_stage") or 0)
+            last_reminder = user.get("last_reminder_at")
             takeover_active = _takeover_active(user)
 
             # Каждое сообщение пользователя отправляется админу
@@ -742,10 +835,16 @@ async def chat(message: Message, bot: Bot) -> None:
 
             await store.add_message(user_id, "user", user_text)
             await store.record_chat_activity(user_id)
-            if reminder_stage:
+            if user.get("blocked"):
+                await store.update_user(user_id, blocked=False)
+            if reminder_stage and last_reminder and (
+                datetime.now(timezone.utc) - datetime.fromisoformat(str(last_reminder).replace("Z", "+00:00"))
+            ) <= timedelta(hours=24):
+                properties = await store.last_reminder_properties(user_id)
                 await store.track_event(
                     user_id, "reminder_returned",
-                    {"stage": f"d{(1, 3, 7)[reminder_stage - 1]}"},
+                    {"stage": properties.get("stage", f"d{(1, 3, 7)[reminder_stage - 1]}"),
+                     "segment": properties.get("segment", "chat")},
                 )
             if not takeover_active:
                 await store.queue_reply(user_id)
