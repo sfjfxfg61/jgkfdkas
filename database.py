@@ -84,6 +84,7 @@ class SupabaseStore:
             "last_active_at": datetime.now(timezone.utc).isoformat(),
             "last_reminder_at": None,
             "reminder_stage": 0,
+            "blocked": False,
         }
         if not existing:
             payload.update({
@@ -218,9 +219,9 @@ class SupabaseStore:
         # PostgREST query strings treat an unescaped '+' as a space. Use UTC Z form.
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat().replace("+00:00", "Z")
         return await self._request("GET", (
-            "users?onboarding_complete=eq.true&blocked=eq.false&total_messages=gt.0&reminder_stage=lt.3"
+            "users?onboarding_complete=eq.true&blocked=eq.false&reminder_stage=lt.3"
             f"&last_active_at=lt.{cutoff}"
-            "&select=user_id,lang,last_active_at,last_reminder_at,reminder_stage"
+            "&select=user_id,lang,total_messages,last_active_at,last_reminder_at,reminder_stage"
             f"&order=last_active_at.asc&limit={limit}"
         ))
 
@@ -233,6 +234,21 @@ class SupabaseStore:
 
     async def mark_blocked(self, user_id: int) -> None:
         await self.update_user(user_id, blocked=True)
+        await self.track_event(user_id, "bot_blocked")
+
+    async def reminder_was_engaged(self, user_id: int, since: str) -> bool:
+        rows = await self._request(
+            "GET", f"events?user_id=eq.{user_id}&event=in.(reminder_clicked,reminder_returned)"
+            f"&created_at=gte.{quote(since.replace('+00:00', 'Z'), safe=':-TZ.')}&select=id&limit=1",
+        )
+        return bool(rows)
+
+    async def last_reminder_properties(self, user_id: int) -> dict:
+        rows = await self._request(
+            "GET", f"events?user_id=eq.{user_id}&event=eq.reminder_sent"
+            "&select=properties&order=created_at.desc,id.desc&limit=1",
+        )
+        return rows[0].get("properties") or {} if rows else {}
 
     async def expired_members(self, limit: int = 100) -> list[dict]:
         cutoff = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -293,6 +309,8 @@ class SupabaseStore:
         stats["retention"] = retention if isinstance(retention, dict) else (retention[0] if retention else {})
         membership = await self._request("POST", "rpc/companion_membership_stats", json={})
         stats["membership"] = membership if isinstance(membership, dict) else (membership[0] if membership else {})
+        health = await self._request("POST", "rpc/companion_health_stats", json={})
+        stats["health"] = health if isinstance(health, dict) else (health[0] if health else {})
         return stats
 
 
