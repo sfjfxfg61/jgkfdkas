@@ -168,6 +168,64 @@ TEXTS: dict[str, dict[str, str]] = {
 }
 
 
+# Short, specific prompts with a single action. No false urgency or guilt framing.
+REMINDER_COPY = {
+    "ru": (
+        "Ответить", "Можно начать с одного сообщения: о чём тебе сейчас интересно поговорить?",
+        "Если удобнее, просто напиши тему — начнём с неё.",
+        "Чат открыт, когда понадобится. Можешь написать одно слово или вопрос.",
+        "Мы остановились на твоём сообщении. Хочешь продолжить ту тему или начать новую?",
+        "Можно вернуться с одной короткой мыслью. Что бы ты хотел обсудить сейчас?",
+        "Если захочешь продолжить разговор, напиши здесь в любое время.",
+    ),
+    "uk": (
+        "Відповісти", "Можна почати з одного повідомлення: про що тобі зараз цікаво поговорити?",
+        "Якщо зручніше, просто напиши тему — почнемо з неї.",
+        "Чат відкритий, коли знадобиться. Можеш написати одне слово або запитання.",
+        "Ми зупинилися на твоєму повідомленні. Продовжимо цю тему чи почнемо нову?",
+        "Можна повернутися з однією короткою думкою. Що ти хотів би обговорити зараз?",
+        "Якщо захочеш продовжити розмову, напиши тут будь-коли.",
+    ),
+    "en": (
+        "Reply", "You can start with one message: what would you like to talk about?",
+        "If it's easier, send just a topic and we'll start there.",
+        "This chat is here when you need it. A question or a single word is enough.",
+        "We left off at your last message. Continue that topic or start a new one?",
+        "One short thought is enough to pick things up. What is on your mind now?",
+        "You can continue this conversation here whenever you like.",
+    ),
+    "es": (
+        "Responder", "Puedes empezar con un mensaje: ¿de qué te gustaría hablar?",
+        "Si te resulta más fácil, escribe solo un tema y empezamos por ahí.",
+        "Este chat sigue aquí cuando lo necesites. Basta con una pregunta o una palabra.",
+        "Nos quedamos en tu último mensaje. ¿Seguimos con ese tema o empezamos otro?",
+        "Una idea breve basta para retomar. ¿Qué te gustaría comentar ahora?",
+        "Cuando quieras continuar, puedes escribir aquí.",
+    ),
+    "de": (
+        "Antworten", "Du kannst mit einer Nachricht beginnen: Worüber möchtest du sprechen?",
+        "Wenn es einfacher ist, schreib nur ein Thema, und wir fangen dort an.",
+        "Dieser Chat ist da, wenn du ihn brauchst. Ein Wort oder eine Frage reicht.",
+        "Wir waren bei deiner letzten Nachricht stehen geblieben. Dieses Thema oder ein neues?",
+        "Ein kurzer Gedanke reicht, um weiterzumachen. Was beschäftigt dich gerade?",
+        "Wenn du weiterreden möchtest, kannst du jederzeit hier schreiben.",
+    ),
+    "fr": (
+        "Répondre", "Tu peux commencer par un message : de quoi aimerais-tu parler ?",
+        "Si c'est plus simple, écris juste un sujet et on commencera par là.",
+        "Ce chat reste disponible quand tu en as besoin. Un mot ou une question suffit.",
+        "On s'était arrêté à ton dernier message. On reprend ce sujet ou un autre ?",
+        "Une courte idée suffit pour reprendre. De quoi aimerais-tu parler maintenant ?",
+        "Tu peux reprendre cette conversation ici quand tu veux.",
+    ),
+}
+for locale, copy in REMINDER_COPY.items():
+    TEXTS[locale].update(dict(zip(
+        ("reminder_cta", "reminder_new_d1", "reminder_new_d3", "reminder_new_d7",
+         "reminder_chat_d1", "reminder_chat_d3", "reminder_chat_d7"), copy,
+    )))
+
+
 def t(lang: str, key: str, **values: object) -> str:
     locale = TEXTS.get(lang, TEXTS["en"])
     template = locale.get(key, TEXTS["en"].get(key, key))
