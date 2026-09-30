@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: victoria-personal-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: COMPANION_NAME
+        value: Vika
+      - key: FOLLOWUPS_ENABLED
+        value: true
+      - key: AUTO_REPLY_AI
+        value: false
+      - key: HUMAN_TAKEOVER_MINUTES
+        value: 30
+      - key: PRIVATE_CHANNEL_URL
+        sync: false
+      - key: PUB_LINK_UK
+        sync: false
+      - key: PUB_LINK_RU
+        sync: false
+      - key: PUB_LINK_EN
+        sync: false
+      - key: PUB_LINK_ES
+        sync: false
+      - key: PUB_LINK_DE
+        sync: false
+      - key: PUB_LINK_FR
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: GROQ_FALLBACK_MODEL
+        sync: false
