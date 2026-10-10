@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: victoria-personal-bot
+    runtime: docker
+    plan: starter
+    numInstances: 1
+    disk:
+      name: victoria-recovery
+      mountPath: /var/data/victoria
+      sizeGB: 1
+    healthCheckPath: /health
+    envVars:
+      - key: STATE_DIR
+        value: /var/data/victoria
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: COMPANION_NAME
+        value: Vika
+      - key: FOLLOWUPS_ENABLED
+        value: true
+      - key: MARKETING_MODE
+        value: limited
+      - key: PRIVATE_CHANNEL_URL
+        sync: false
+      - key: PUB_LINK_UK
+        sync: false
+      - key: PUB_LINK_RU
+        sync: false
+      - key: PUB_LINK_EN
+        sync: false
+      - key: PUB_LINK_ES
+        sync: false
+      - key: PUB_LINK_DE
+        sync: false
+      - key: PUB_LINK_FR
+        sync: false
