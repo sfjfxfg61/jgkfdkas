@@ -1,3 +1,0 @@
-Victoria v10 business-ready + traffic partner dashboards
-Built directly from the supplied production project; v7/v8/v9 are treated as NOT deployed.
-Key changes: regional pricing incl. Asia/SEA, event-driven followups, 10-minute checkout rescue, post-payment check-in, traffic uploader profiles, first-touch partner links, revenue-share ledger, payout tracking, admin + self-service partner dashboards.
