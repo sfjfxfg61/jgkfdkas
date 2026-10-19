@@ -594,7 +594,7 @@ async def admin_partners(msg: Message, *, from_button: bool = False):
                      f"\nНачислено: {earned} ⭐ · выплачено: {paid} ⭐ · остаток: {earned-paid} ⭐"
                      f"\nСтавка: {partner['commission_pct']}% · {'активен' if partner['active'] else 'выключен'}"
                      f"\nСсылка: https://t.me/{(await msg.bot.get_me()).username}?start={code}")
-    lines.append('\n/addpartner ID код название — добавить (30%)'
+    lines.append('\n/addpartner ID код название — добавить (50%)'
                  '\n/partnerpct код процент — изменить ставку'
                  '\n/partneroff код — выключить; /partneron код — включить'
                  '\n/partnerpay код сумма — записать выплату в Stars')
