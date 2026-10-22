@@ -1,0 +1,5 @@
+pytest>=8,<10
+pytest-asyncio>=0.23
+ruff>=0.17,<0.18
+# Optional native PostgreSQL integration tests when TEST_DATABASE_URL is supplied:
+psycopg[binary]>=3.2,<4
